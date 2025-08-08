@@ -40,5 +40,3 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
     c.showPage()
     c.save()
     return (f"{title or 'draft'}.pdf", buffer.getvalue())
-
-

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import os
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
 
 from google import genai
-
 
 DEFAULT_MODEL_NAME = "gemini-2.5-pro"
 
@@ -63,7 +62,9 @@ def bootstrap_spec(sample_manual_md: str, idea_description: str) -> str:
         return "# 特許明細書草案 (生成失敗)\n\n- 自動生成でエラーが発生しました。"
 
 
-def next_questions(sample_manual_md: str, transcript: List[Dict[str, str]], num_questions: int = 3) -> List[str]:
+def next_questions(
+    sample_manual_md: str, transcript: List[Dict[str, str]], num_questions: int = 3
+) -> List[str]:
     client = _get_client()
     if client is None:
         return [
@@ -90,11 +91,13 @@ def next_questions(sample_manual_md: str, transcript: List[Dict[str, str]], num_
             "新規性の根拠はありますか？（はい/いいえ）",
             "実施形態の代替案はありますか？（はい/いいえ）",
         ][:num_questions]
-    lines = [l.strip("- ") for l in text.splitlines() if l.strip()]
-    return [l for l in lines if l][:num_questions]
+    lines = [line.strip("- ") for line in text.splitlines() if line.strip()]
+    return [line for line in lines if line][:num_questions]
 
 
-def refine_spec(sample_manual_md: str, transcript: List[Dict[str, str]], current_spec_md: str) -> str:
+def refine_spec(
+    sample_manual_md: str, transcript: List[Dict[str, str]], current_spec_md: str
+) -> str:
     client = _get_client()
     if client is None:
         return current_spec_md
@@ -114,5 +117,3 @@ def refine_spec(sample_manual_md: str, transcript: List[Dict[str, str]], current
         return resp.text or current_spec_md
     except Exception:
         return current_spec_md
-
-

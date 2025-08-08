@@ -9,5 +9,3 @@ def append_user_answer(transcript: List[Dict[str, str]], answer: str) -> None:
 
 def append_assistant_message(transcript: List[Dict[str, str]], message: str) -> None:
     transcript.append({"role": "assistant", "content": message})
-
-

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import uuid
 from pathlib import Path
 from typing import List
@@ -7,12 +8,16 @@ from typing import List
 import streamlit as st
 from dotenv import load_dotenv
 
+# Ensure project root is on sys.path so that 'app' package is importable
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.export import export_docx, export_pdf
 from app.llm import bootstrap_spec, generate_title, next_questions, refine_spec
 from app.spec_builder import append_assistant_message, append_user_answer
 from app.state import AppState, Idea
 from app.storage import delete_idea, get_idea, load_ideas, save_ideas
-from app.export import export_docx, export_pdf
-
 
 APP_TITLE = "Patent Chat"
 DEFAULT_CATEGORY = "防災"
@@ -53,8 +58,12 @@ def sidebar_ui():
 
 def new_idea_form():
     st.subheader("新規アイデア")
-    category = st.selectbox("カテゴリ", ["防災", "医療", "製造", "ソフトウェア", "環境", "その他"], index=0)
-    description = st.text_area("アイデアの詳細説明", height=160, placeholder="アイデアの概要を記載…")
+    category = st.selectbox(
+        "カテゴリ", ["防災", "医療", "製造", "ソフトウェア", "環境", "その他"], index=0
+    )
+    description = st.text_area(
+        "アイデアの詳細説明", height=160, placeholder="アイデアの概要を記載…"
+    )
     cols = st.columns(2)
     if cols[0].button("保存"):
         idea_id = str(uuid.uuid4())
@@ -127,7 +136,9 @@ def hearing_ui(idea: Idea):
     # Improve draft from transcript
     if st.button("ドラフトを更新"):
         with st.spinner("ドラフト更新中…"):
-            idea.draft_spec_markdown = refine_spec(manual_md, idea.messages, idea.draft_spec_markdown)
+            idea.draft_spec_markdown = refine_spec(
+                manual_md, idea.messages, idea.draft_spec_markdown
+            )
             save_ideas(st.session_state.ideas)
 
     st.divider()
@@ -203,5 +214,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

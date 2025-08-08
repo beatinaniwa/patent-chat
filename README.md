@@ -23,11 +23,11 @@ uv sync
 
 ## 開発サーバ起動
 ```bash
-uv run streamlit run app/app.py
+uv run streamlit run app/main.py
 ```
 
 ## 構成
-- `app/app.py`: Streamlit エントリポイント
+- `app/main.py`: Streamlit エントリポイント
 - `app/state.py`: アプリ全体の状態管理（SessionState）
 - `app/storage.py`: アイデアとセッションの永続化層（ローカル JSON）
 - `app/llm.py`: Gemini 2.5 Pro API ラッパ（google-genai）
