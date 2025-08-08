@@ -31,3 +31,8 @@ extend-select = ["E", "F", "W", "I"]
 [tool.ruff.isort]
 known-first-party = ["app"]
 profile = "black"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = false

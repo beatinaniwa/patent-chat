@@ -7,11 +7,11 @@ from typing import List
 import streamlit as st
 from dotenv import load_dotenv
 
-from .llm import bootstrap_spec, generate_title, next_questions, refine_spec
-from .spec_builder import append_assistant_message, append_user_answer
-from .state import AppState, Idea
-from .storage import delete_idea, get_idea, load_ideas, save_ideas
-from .export import export_docx, export_pdf
+from app.llm import bootstrap_spec, generate_title, next_questions, refine_spec
+from app.spec_builder import append_assistant_message, append_user_answer
+from app.state import AppState, Idea
+from app.storage import delete_idea, get_idea, load_ideas, save_ideas
+from app.export import export_docx, export_pdf
 
 
 APP_TITLE = "Patent Chat"
@@ -72,10 +72,12 @@ def new_idea_form():
 def edit_idea_form(idea: Idea):
     st.subheader("アイデア編集")
     title = st.text_input("タイトル", value=idea.title)
-    category = st.selectbox(
-        "カテゴリ", ["防災", "医療", "製造", "ソフトウェア", "環境", "その他"],
-        index=0 if idea.category == DEFAULT_CATEGORY else 5,
-    )
+    categories = ["防災", "医療", "製造", "ソフトウェア", "環境", "その他"]
+    try:
+        idx = categories.index(idea.category)
+    except ValueError:
+        idx = 0
+    category = st.selectbox("カテゴリ", categories, index=idx)
     description = st.text_area("アイデアの詳細説明", value=idea.description, height=160)
     if st.button("更新"):
         idea.title = title
@@ -132,14 +134,31 @@ def hearing_ui(idea: Idea):
     st.subheader("ドラフト")
     st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
-    # Export
+    with st.expander("ドラフトを編集"):
+        edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=360)
+        if st.button("編集内容を保存"):
+            idea.draft_spec_markdown = edited
+            save_ideas(st.session_state.ideas)
+            st.success("保存しました。")
+
+    # Export (always available as download buttons)
     c1, c2 = st.columns(2)
-    if c1.button("Word ダウンロード"):
-        name, data = export_docx(idea.title, idea.draft_spec_markdown)
-        st.download_button("Word を保存", data=data, file_name=name, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    if c2.button("PDF ダウンロード"):
-        name, data = export_pdf(idea.title, idea.draft_spec_markdown)
-        st.download_button("PDF を保存", data=data, file_name=name, mime="application/pdf")
+    name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
+    c1.download_button(
+        "Word を保存",
+        data=data_docx,
+        file_name=name_docx,
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        use_container_width=True,
+    )
+    name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
+    c2.download_button(
+        "PDF を保存",
+        data=data_pdf,
+        file_name=name_pdf,
+        mime="application/pdf",
+        use_container_width=True,
+    )
 
 
 def main():
