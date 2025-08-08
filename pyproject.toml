@@ -1,0 +1,33 @@
+[project]
+name = "patent-chat"
+version = "0.1.0"
+description = "Streamlit app to ideate patents with Gemini and generate a draft specification"
+authors = [{ name = "Your Name" }]
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "streamlit>=1.37.1",
+  "python-dotenv>=1.0.1",
+  "pydantic>=2.8.2",
+  "pydantic-settings>=2.4.0",
+  "google-generativeai>=0.7.2",
+  "python-docx>=1.1.2",
+  "reportlab>=4.2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.5.6",
+  "pytest>=8.3.2",
+]
+
+[tool.uv]
+# uv uses this table for resolution; empty is fine.
+
+[tool.ruff]
+line-length = 100
+extend-select = ["E", "F", "W", "I"]
+
+[tool.ruff.isort]
+known-first-party = ["app"]
+profile = "black"
