@@ -21,7 +21,18 @@ from app.storage import delete_idea, get_idea, load_ideas, save_ideas
 
 APP_TITLE = "Patent Chat"
 DEFAULT_CATEGORY = "防災"
-SAMPLE_PATH = Path(__file__).resolve().parent.parent / "sample.md"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _load_instruction_markdown() -> str:
+    """Load drafting instruction document with fallback to sample.md."""
+    primary = PROJECT_ROOT / "LLM_Prompt_for_Patent_Application_Drafting_from_Idea.md"
+    fallback = PROJECT_ROOT / "sample.md"
+    path = primary if primary.exists() else fallback
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
 
 
 def init_session_state() -> None:
@@ -65,15 +76,39 @@ def new_idea_form():
         "アイデアの詳細説明", height=160, placeholder="アイデアの概要を記載…"
     )
     cols = st.columns(2)
-    if cols[0].button("保存"):
+    if cols[0].button("保存", type="primary"):
         idea_id = str(uuid.uuid4())
-        title = generate_title(description)
-        idea = Idea(id=idea_id, title=title, category=category, description=description)
-        st.session_state.ideas.append(idea)
-        save_ideas(st.session_state.ideas)
+        with st.status("処理を開始します…", expanded=True) as status:
+            status.update(label="タイトル生成中…", state="running")
+            title = generate_title(description)
+
+            status.update(label="アイデアを保存中…", state="running")
+            idea = Idea(
+                id=idea_id,
+                title=title,
+                category=category,
+                description=description,
+            )
+            st.session_state.ideas.append(idea)
+            save_ideas(st.session_state.ideas)
+
+            status.update(label="初期ドラフト生成中…", state="running")
+            manual_md = _load_instruction_markdown()
+            idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
+            save_ideas(st.session_state.ideas)
+
+            status.update(label="初回質問を準備中…", state="running")
+            qs = next_questions(manual_md, idea.messages, num_questions=3)
+            for q in qs:
+                append_assistant_message(idea.messages, q)
+            save_ideas(st.session_state.ideas)
+
+            status.update(label="完了", state="complete")
+
         st.session_state.app_state.selected_idea_id = idea_id
         st.session_state.app_state.show_new_idea_form = False
-        st.success("保存しました。")
+        st.session_state.start_hearing = True
+        st.rerun()
     if cols[1].button("キャンセル"):
         st.session_state.app_state.show_new_idea_form = False
 
@@ -98,7 +133,7 @@ def edit_idea_form(idea: Idea):
 
 def hearing_ui(idea: Idea):
     st.subheader("AI ヒアリング")
-    manual_md = SAMPLE_PATH.read_text(encoding="utf-8")
+    manual_md = _load_instruction_markdown()
 
     # Bootstrap draft
     if not idea.draft_spec_markdown:

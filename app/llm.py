@@ -12,6 +12,11 @@ def _model_name() -> str:
     return os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME)
 
 
+def _title_model_name() -> str:
+    # タイトル生成は軽量・高速な flash を既定とする
+    return os.getenv("GEMINI_TITLE_MODEL", "gemini-2.5-flash")
+
+
 def _get_client() -> Optional[genai.Client]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
     try:
@@ -31,7 +36,7 @@ def generate_title(idea_description: str) -> str:
     )
     try:
         resp = client.models.generate_content(
-            model=_model_name(),
+            model=_title_model_name(),
             contents=prompt,
         )
         return (resp.text or "タイトル")[:120]
@@ -44,11 +49,11 @@ def bootstrap_spec(sample_manual_md: str, idea_description: str) -> str:
     if client is None:
         return "# 特許明細書草案 (未記載)\n\n- APIキー未設定のため自動生成をスキップしました。"
     system = (
-        "あなたは特許明細書の下書きを作る専門家です。与えられた手順書を参照して、"
+        "あなたは特許明細書の下書きを作る専門家です。与えられた指示書（プロンプト）を最優先で参照し、"
         "不足部分は'未記載'と明示しつつ、Markdownで初稿を作ってください。"
     )
     prompt = (
-        f"[手順書]\n{sample_manual_md}\n\n"
+        f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n\n"
         "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
     )

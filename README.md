@@ -19,6 +19,8 @@ uv sync
 # 環境変数設定（例）
 # .env に以下を設定するか、shell に export してください
 # GOOGLE_API_KEY=xxxxx  # または GEMINI_API_KEY=xxxxx
+# GEMINI_MODEL=gemini-2.5-pro          # 仕様生成系の既定モデル
+# GEMINI_TITLE_MODEL=gemini-2.5-flash  # タイトル生成の既定モデル（高速）
 ```
 
 ## 開発サーバ起動
@@ -34,6 +36,7 @@ uv run streamlit run app/main.py
 - `app/spec_builder.py`: 特許明細作成ロジック（質問計画・生成）
 - `app/export.py`: Word/PDF 出力
 - `sample.md`: 特許明細作成手順書
+- `LLM_Prompt_for_Patent_Application_Drafting_from_Idea.md`:（任意）アイディアから明細作成のための指示書。存在すれば最優先で使用
 - `uv.lock` / `pyproject.toml`: 依存管理
 
 ## 環境変数
