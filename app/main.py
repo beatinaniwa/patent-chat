@@ -98,7 +98,7 @@ def new_idea_form():
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
-            qs = next_questions(manual_md, idea.messages, num_questions=3)
+            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=3)
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)
@@ -149,7 +149,7 @@ def hearing_ui(idea: Idea):
     # Ask next questions
     if st.button("次の質問を提示"):
         with st.spinner("質問を準備中…"):
-            qs = next_questions(manual_md, idea.messages, num_questions=3)
+            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=3)
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)
