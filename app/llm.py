@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from google import genai
 
@@ -51,10 +51,17 @@ def generate_title(idea_description: str) -> str:
         f"アイデア概要:\n{idea_description}"
     )
     try:
+        model_name = _title_model_name()
+        logger.info(
+            "generate_title: calling model=%s, idea_len=%d",
+            model_name,
+            len(idea_description or ""),
+        )
         resp = client.models.generate_content(
-            model=_title_model_name(),
+            model=model_name,
             contents=prompt,
         )
+        _log_response_debug("generate_title", resp)
         text = (resp.text or "").strip()
         if not text:
             logger.warning("generate_title: Empty response; falling back to first-line title.")
@@ -80,10 +87,18 @@ def bootstrap_spec(sample_manual_md: str, idea_description: str) -> str:
         "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
     )
     try:
+        model_name = _model_name()
+        logger.info(
+            "bootstrap_spec: calling model=%s, instruction_len=%d, idea_len=%d",
+            model_name,
+            len(sample_manual_md or ""),
+            len(idea_description or ""),
+        )
         resp = client.models.generate_content(
-            model=_model_name(),
+            model=model_name,
             contents=f"{system}\n\n{prompt}",
         )
+        _log_response_debug("bootstrap_spec", resp)
         text = (resp.text or "").strip()
         if not text:
             logger.error("bootstrap_spec: Empty response text; using fallback skeleton.")
@@ -125,10 +140,23 @@ def next_questions(
         "- 既に回答済みの重複質問は避ける\n".replace("{num}", str(num_questions))
     )
     try:
+        model_name = _model_name()
+        logger.info(
+            (
+                "next_questions: calling model=%s, instruction_len=%d, "
+                "transcript_turns=%d, draft_len=%d, n=%d"
+            ),
+            model_name,
+            len(instruction_md or ""),
+            len(transcript or []),
+            len(current_spec_md or ""),
+            num_questions,
+        )
         resp = client.models.generate_content(
-            model=_model_name(),
+            model=model_name,
             contents=f"{system}\n\n{prompt}",
         )
+        _log_response_debug("next_questions", resp)
         text = resp.text or ""
     except Exception:
         logger.exception("next_questions: Gemini API error; using canned questions.")
@@ -157,10 +185,19 @@ def refine_spec(
         "出力は更新後のMarkdown全文のみ。"
     )
     try:
+        model_name = _model_name()
+        logger.info(
+            "refine_spec: calling model=%s, instruction_len=%d, transcript_turns=%d, draft_len=%d",
+            model_name,
+            len(sample_manual_md or ""),
+            len(transcript or []),
+            len(current_spec_md or ""),
+        )
         resp = client.models.generate_content(
-            model=_model_name(),
+            model=model_name,
             contents=prompt,
         )
+        _log_response_debug("refine_spec", resp)
         text = (resp.text or "").strip()
         if not text:
             logger.warning("refine_spec: Empty response; leaving spec unchanged.")
@@ -169,6 +206,28 @@ def refine_spec(
     except Exception:
         logger.exception("refine_spec: Gemini API error; leaving spec unchanged.")
         return current_spec_md
+
+
+def _log_response_debug(operation: str, resp: Any) -> None:
+    """Best-effort logging of useful response metadata without crashing."""
+    try:
+        finishes = []
+        for cand in getattr(resp, "candidates", []) or []:
+            finishes.append(getattr(cand, "finish_reason", None))
+        prompt_feedback = getattr(resp, "prompt_feedback", None)
+        block_reason = getattr(prompt_feedback, "block_reason", None) if prompt_feedback else None
+        usage = getattr(resp, "usage_metadata", None)
+        text_len = len(getattr(resp, "text", "") or "")
+        logger.info(
+            "%s: finish_reasons=%s block_reason=%s usage=%s text_len=%d",
+            operation,
+            finishes,
+            block_reason,
+            usage,
+            text_len,
+        )
+    except Exception:
+        logger.exception("%s: failed to inspect response", operation)
 
 
 def _fallback_skeleton(instruction_md: str, idea_description: str) -> str:

@@ -183,8 +183,55 @@ def hearing_ui(idea: Idea):
     # 2) Hearing below
     st.subheader("AI ヒアリング")
 
-    # Conversation history
-    for msg in idea.messages:
+    # Collect consecutive assistant messages at the tail (unanswered)
+    tail_assistant: list[str] = []
+    for m in reversed(idea.messages):
+        if m.get("role") == "assistant":
+            tail_assistant.append(m.get("content", ""))
+        else:
+            break
+    tail_assistant = list(reversed(tail_assistant))
+
+    # Heuristic: keep only yes/no style questions for the radio form
+    def _looks_like_yes_no_question(text: str) -> bool:
+        if not text:
+            return False
+        t = str(text).strip()
+        if "はい/いいえ" in t or "（はい/いいえ" in t:
+            return True
+        if t.endswith("？") or t.endswith("?"):
+            return True
+        return False
+
+    pending_candidates = [q for q in tail_assistant if _looks_like_yes_no_question(q)]
+    # De-duplicate while preserving order
+    seen_q: set[str] = set()
+    pending_questions: list[str] = []
+    for q in pending_candidates:
+        if q not in seen_q:
+            seen_q.add(q)
+            pending_questions.append(q)
+    pending_questions = pending_questions[:5]
+
+    # Determine which trailing assistant messages to hide from the history
+    # (exactly those shown in the pending questions)
+    to_hide_indices = set()
+    match_from_end = list(reversed(pending_questions))
+    ptr = 0
+    for idx in range(len(idea.messages) - 1, -1, -1):
+        if ptr >= len(match_from_end):
+            break
+        m = idea.messages[idx]
+        if m.get("role") != "assistant":
+            break
+        if m.get("content", "") == match_from_end[ptr]:
+            to_hide_indices.add(idx)
+            ptr += 1
+
+    # Conversation history (exclude pending questions to avoid duplication)
+    for i, msg in enumerate(idea.messages):
+        if i in to_hide_indices:
+            continue
         role = "ユーザー" if msg["role"] == "user" else "AI"
         st.markdown(f"**{role}:** {msg['content']}")
 
@@ -198,19 +245,11 @@ def hearing_ui(idea: Idea):
             st.rerun()
 
     # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
-    pending: list[str] = []
-    for m in reversed(idea.messages):
-        if m.get("role") == "assistant":
-            pending.append(m.get("content", ""))
-        else:
-            break
-    pending = list(reversed(pending))[:5]
-
-    if pending:
+    if pending_questions:
         st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
         with st.form(f"qa-form-{idea.id}"):
             selections: list[str] = []
-            for i, q in enumerate(pending, start=1):
+            for i, q in enumerate(pending_questions, start=1):
                 st.markdown(f"Q{i}: {q}")
                 choice = st.radio(
                     key=f"ans-{idea.id}-{i}",
