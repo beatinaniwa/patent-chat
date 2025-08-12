@@ -14,6 +14,8 @@ class Idea:
     messages: List[Dict[str, str]] = field(default_factory=list)
     # Draft specification text (Markdown)
     draft_spec_markdown: str = ""
+    # Draft version counter (1 = 初版)
+    draft_version: int = 1
 
 
 @dataclass

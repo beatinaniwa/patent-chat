@@ -150,7 +150,7 @@ def hearing_ui(idea: Idea):
         st.rerun()
 
     # 1) Draft first
-    st.subheader("ドラフト")
+    st.subheader(f"ドラフト（第{idea.draft_version}版）")
     st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
     with st.expander("ドラフトを編集"):
@@ -197,34 +197,51 @@ def hearing_ui(idea: Idea):
             save_ideas(st.session_state.ideas)
             st.rerun()
 
-    # Quick answer buttons (Yes/No) with auto-refine
-    cols = st.columns(3)
-    if cols[0].button("はい"):
-        append_user_answer(idea.messages, "はい")
-        with st.spinner("ドラフト更新中…"):
-            idea.draft_spec_markdown = refine_spec(
-                manual_md, idea.messages, idea.draft_spec_markdown
-            )
-            save_ideas(st.session_state.ideas)
-        st.rerun()
-    if cols[1].button("いいえ"):
-        append_user_answer(idea.messages, "いいえ")
-        with st.spinner("ドラフト更新中…"):
-            idea.draft_spec_markdown = refine_spec(
-                manual_md, idea.messages, idea.draft_spec_markdown
-            )
-            save_ideas(st.session_state.ideas)
-        st.rerun()
-    with cols[2]:
-        free_text = st.text_input("自由入力")
-        if st.button("送信") and free_text:
-            append_user_answer(idea.messages, free_text)
-            with st.spinner("ドラフト更新中…"):
-                idea.draft_spec_markdown = refine_spec(
-                    manual_md, idea.messages, idea.draft_spec_markdown
+    # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
+    pending: list[str] = []
+    for m in reversed(idea.messages):
+        if m.get("role") == "assistant":
+            pending.append(m.get("content", ""))
+        else:
+            break
+    pending = list(reversed(pending))[:5]
+
+    if pending:
+        st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
+        with st.form(f"qa-form-{idea.id}"):
+            selections: list[str] = []
+            for i, q in enumerate(pending, start=1):
+                st.markdown(f"Q{i}: {q}")
+                choice = st.radio(
+                    key=f"ans-{idea.id}-{i}",
+                    label="回答",
+                    options=["はい", "いいえ", "わからない"],
+                    index=2,
+                    horizontal=True,
                 )
-                save_ideas(st.session_state.ideas)
-            st.rerun()
+                selections.append(choice)
+            submitted = st.form_submit_button("回答をまとめて送信", type="primary")
+            if submitted:
+                for ans in selections:
+                    append_user_answer(idea.messages, ans)
+                with st.spinner("ドラフト更新中…"):
+                    idea.draft_spec_markdown = refine_spec(
+                        manual_md, idea.messages, idea.draft_spec_markdown
+                    )
+                    idea.draft_version += 1
+                    save_ideas(st.session_state.ideas)
+                # 新版表示後に次の質問を自動提示
+                with st.spinner("次の質問を準備中…"):
+                    qs2 = next_questions(
+                        manual_md,
+                        idea.messages,
+                        idea.draft_spec_markdown,
+                        num_questions=5,
+                    )
+                    for q in qs2:
+                        append_assistant_message(idea.messages, q)
+                    save_ideas(st.session_state.ideas)
+                st.rerun()
 
 
 def main():
