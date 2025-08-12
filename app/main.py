@@ -98,7 +98,7 @@ def new_idea_form():
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
-            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=3)
+            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)
@@ -132,51 +132,15 @@ def edit_idea_form(idea: Idea):
 
 
 def hearing_ui(idea: Idea):
-    st.subheader("AI ヒアリング")
     manual_md = _load_instruction_markdown()
 
-    # Bootstrap draft
+    # Ensure draft exists
     if not idea.draft_spec_markdown:
         with st.spinner("初期ドラフト生成中…"):
             idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
             save_ideas(st.session_state.ideas)
 
-    # Conversation history
-    for msg in idea.messages:
-        role = "ユーザー" if msg["role"] == "user" else "AI"
-        st.markdown(f"**{role}:** {msg['content']}")
-
-    # Ask next questions
-    if st.button("次の質問を提示"):
-        with st.spinner("質問を準備中…"):
-            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=3)
-            for q in qs:
-                append_assistant_message(idea.messages, q)
-            save_ideas(st.session_state.ideas)
-
-    # Quick answer buttons (Yes/No)
-    cols = st.columns(3)
-    if cols[0].button("はい"):
-        append_user_answer(idea.messages, "はい")
-        save_ideas(st.session_state.ideas)
-    if cols[1].button("いいえ"):
-        append_user_answer(idea.messages, "いいえ")
-        save_ideas(st.session_state.ideas)
-    with cols[2]:
-        free_text = st.text_input("自由入力")
-        if st.button("送信") and free_text:
-            append_user_answer(idea.messages, free_text)
-            save_ideas(st.session_state.ideas)
-
-    # Improve draft from transcript
-    if st.button("ドラフトを更新"):
-        with st.spinner("ドラフト更新中…"):
-            idea.draft_spec_markdown = refine_spec(
-                manual_md, idea.messages, idea.draft_spec_markdown
-            )
-            save_ideas(st.session_state.ideas)
-
-    st.divider()
+    # 1) Draft first
     st.subheader("ドラフト")
     st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
@@ -187,7 +151,7 @@ def hearing_ui(idea: Idea):
             save_ideas(st.session_state.ideas)
             st.success("保存しました。")
 
-    # Export (always available as download buttons)
+    # Export
     c1, c2 = st.columns(2)
     name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
     c1.download_button(
@@ -205,6 +169,53 @@ def hearing_ui(idea: Idea):
         mime="application/pdf",
         use_container_width=True,
     )
+
+    st.divider()
+    # 2) Hearing below
+    st.subheader("AI ヒアリング")
+
+    # Conversation history
+    for msg in idea.messages:
+        role = "ユーザー" if msg["role"] == "user" else "AI"
+        st.markdown(f"**{role}:** {msg['content']}")
+
+    # Ask next questions (up to 5)
+    if st.button("次の質問を提示（最大5件）"):
+        with st.spinner("質問を準備中…"):
+            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
+            for q in qs:
+                append_assistant_message(idea.messages, q)
+            save_ideas(st.session_state.ideas)
+            st.rerun()
+
+    # Quick answer buttons (Yes/No) with auto-refine
+    cols = st.columns(3)
+    if cols[0].button("はい"):
+        append_user_answer(idea.messages, "はい")
+        with st.spinner("ドラフト更新中…"):
+            idea.draft_spec_markdown = refine_spec(
+                manual_md, idea.messages, idea.draft_spec_markdown
+            )
+            save_ideas(st.session_state.ideas)
+        st.rerun()
+    if cols[1].button("いいえ"):
+        append_user_answer(idea.messages, "いいえ")
+        with st.spinner("ドラフト更新中…"):
+            idea.draft_spec_markdown = refine_spec(
+                manual_md, idea.messages, idea.draft_spec_markdown
+            )
+            save_ideas(st.session_state.ideas)
+        st.rerun()
+    with cols[2]:
+        free_text = st.text_input("自由入力")
+        if st.button("送信") and free_text:
+            append_user_answer(idea.messages, free_text)
+            with st.spinner("ドラフト更新中…"):
+                idea.draft_spec_markdown = refine_spec(
+                    manual_md, idea.messages, idea.draft_spec_markdown
+                )
+                save_ideas(st.session_state.ideas)
+            st.rerun()
 
 
 def main():
