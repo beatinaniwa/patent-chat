@@ -140,6 +140,15 @@ def hearing_ui(idea: Idea):
             idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
             save_ideas(st.session_state.ideas)
 
+    # Auto-generate initial questions if none exist yet (up to 5)
+    if not any(m.get("role") == "assistant" for m in idea.messages):
+        with st.spinner("初回質問を準備中…"):
+            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
+            for q in qs:
+                append_assistant_message(idea.messages, q)
+            save_ideas(st.session_state.ideas)
+        st.rerun()
+
     # 1) Draft first
     st.subheader("ドラフト")
     st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
