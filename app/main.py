@@ -50,6 +50,7 @@ def sidebar_ui():
     # New idea button
     if st.sidebar.button("＋ 新規アイデアを作成", use_container_width=True):
         state.show_new_idea_form = True
+        st.rerun()
 
     # Idea list
     for idea in ideas:
@@ -57,14 +58,17 @@ def sidebar_ui():
         if cols[0].button(f"{idea.title or '(無題)'}", key=f"sel-{idea.id}"):
             state.selected_idea_id = idea.id
             state.show_new_idea_form = False
+            st.rerun()
         if cols[1].button("編集", key=f"edit-{idea.id}"):
             state.selected_idea_id = idea.id
             state.show_new_idea_form = True
+            st.rerun()
         if cols[2].button("削除", key=f"del-{idea.id}"):
             st.session_state.ideas = delete_idea(ideas, idea.id)
             save_ideas(st.session_state.ideas)
             if state.selected_idea_id == idea.id:
                 state.selected_idea_id = None
+            st.rerun()
 
 
 def new_idea_form():
