@@ -240,27 +240,22 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
         if show_questions_first:
             st.markdown("**これまでの質問と回答**")
 
-        # Display Q&A pairs (question: answer on same line)
-        i = 0
-        while i < len(idea.messages):
+        # Collect all questions and answers separately (excluding pending)
+        questions = []
+        answers = []
+
+        for i, msg in enumerate(idea.messages):
             if i in to_hide_indices:
-                i += 1
                 continue
 
-            msg = idea.messages[i]
             if msg["role"] == "assistant":
-                question = _clean_ai_message(msg['content'])
-                # Check if next message is user's answer
-                if i + 1 < len(idea.messages) and idea.messages[i + 1]["role"] == "user":
-                    answer = idea.messages[i + 1]['content']
-                    st.markdown(f"{question}: {answer}")
-                    i += 2  # Skip both question and answer
-                else:
-                    # Unanswered question (should be in pending_questions)
-                    i += 1
-            else:
-                # Standalone user message (shouldn't happen in normal flow)
-                i += 1
+                questions.append(_clean_ai_message(msg['content']))
+            elif msg["role"] == "user":
+                answers.append(msg['content'])
+
+        # Pair questions with answers and display them
+        for q, a in zip(questions, answers):
+            st.markdown(f"{q}: {a}")
 
     # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
     if not show_questions_first and pending_questions:
@@ -390,24 +385,22 @@ def hearing_ui(idea: Idea):
 
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
-            # Display Q&A pairs (question: answer on same line)
-            i = 0
-            while i < len(idea.messages):
-                msg = idea.messages[i]
+            # Collect all questions and answers separately
+            questions = []
+            answers = []
+
+            for msg in idea.messages:
                 if msg["role"] == "assistant":
-                    question = _clean_ai_message(msg['content'])
-                    # Check if next message is user's answer
-                    if i + 1 < len(idea.messages) and idea.messages[i + 1]["role"] == "user":
-                        answer = idea.messages[i + 1]['content']
-                        st.markdown(f"{question}: {answer}")
-                        i += 2  # Skip both question and answer
-                    else:
-                        # Unanswered question
-                        st.markdown(f"{question}: (未回答)")
-                        i += 1
+                    questions.append(_clean_ai_message(msg['content']))
+                elif msg["role"] == "user":
+                    answers.append(msg['content'])
+
+            # Display Q&A pairs (question: answer on same line)
+            for i, q in enumerate(questions):
+                if i < len(answers):
+                    st.markdown(f"{q}: {answers[i]}")
                 else:
-                    # Standalone user message (shouldn't happen in normal flow)
-                    i += 1
+                    st.markdown(f"{q}: (未回答)")
 
     # Non-final version display
     elif idea.draft_version == 1:

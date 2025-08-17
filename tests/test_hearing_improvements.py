@@ -154,6 +154,66 @@ class TestQAHistoryFormat:
             "AI:" in call or "ユーザー:" in call for call in markdown_calls
         ), "Should not display 'AI:' or 'ユーザー:' prefixes"
 
+    @patch("app.main.st")
+    def test_multiple_qa_pairs_displayed(self, mock_st):
+        """Test that all answered Q&A pairs are displayed."""
+        from app.main import _render_hearing_section
+
+        idea = Idea(
+            id="test",
+            title="Test",
+            category="test",
+            description="test",
+            draft_spec_markdown="draft",
+            draft_version=3,  # Third version after 2 rounds of Q&A
+            messages=[
+                # First round
+                {"role": "assistant", "content": "緊急時に使用されますか？"},
+                {"role": "assistant", "content": "既存技術の改良ですか？"},
+                {"role": "assistant", "content": "コストは重要ですか？"},
+                {"role": "user", "content": "はい"},
+                {"role": "user", "content": "いいえ"},
+                {"role": "user", "content": "わからない"},
+                # Second round
+                {"role": "assistant", "content": "防水機能は必要ですか？"},
+                {"role": "assistant", "content": "バッテリー駆動ですか？"},
+                {"role": "user", "content": "はい"},
+                {"role": "user", "content": "はい"},
+                # Third round (pending)
+                {"role": "assistant", "content": "軽量化は重要ですか？"},
+                {"role": "assistant", "content": "屋外で使用しますか？"},
+            ],
+        )
+
+        # Mock form context manager
+        mock_form = MagicMock()
+        mock_form.__enter__ = MagicMock(return_value=mock_form)
+        mock_form.__exit__ = MagicMock(return_value=None)
+        mock_st.form.return_value = mock_form
+        mock_st.form_submit_button.return_value = False
+
+        _render_hearing_section(idea, "manual_md", show_questions_first=True)
+
+        # Check markdown calls for Q&A history
+        markdown_calls = [str(call) for call in mock_st.markdown.call_args_list]
+
+        # All answered pairs should be displayed
+        # Note: The current implementation may have issues with this format
+        # We need to check what is actually displayed
+        print("DEBUG: markdown calls:", markdown_calls)
+
+        # Count how many Q&A pairs are displayed
+        qa_pairs = [
+            call
+            for call in markdown_calls
+            if ": " in call and ("はい" in call or "いいえ" in call or "わからない" in call)
+        ]
+
+        # We should have 5 answered Q&A pairs (3 from first round + 2 from second round)
+        assert (
+            len(qa_pairs) >= 5
+        ), f"Should display all 5 answered Q&A pairs, but got {len(qa_pairs)}: {qa_pairs}"
+
 
 class TestDefaultAnswerSelection:
     """Test cases for default answer selection in radio buttons."""
