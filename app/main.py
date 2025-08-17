@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -33,6 +34,36 @@ def _load_instruction_markdown() -> str:
         return path.read_text(encoding="utf-8")
     except Exception:
         return ""
+
+
+def _clean_ai_message(content: str) -> str:
+    """AIメッセージから導入部分を除外して本文のみ返す."""
+    if not content:
+        return ""
+
+    # 除外パターン（一般的な導入表現）
+    intro_patterns = [
+        r'^承知.*?。\s*',
+        r'^了解.*?。\s*',
+        r'^確認させて.*?。\s*',
+        r'^わかりました.*?。\s*',
+        r'^ありがとうございます.*?。\s*',
+        r'^それでは.*?。\s*',
+        r'^以下.*?確認.*?。\s*',
+        r'^次の点について.*?。\s*',
+        r'^追加で確認.*?。\s*',
+    ]
+
+    cleaned = content.strip()
+
+    # 各パターンで導入部分を除去
+    for pattern in intro_patterns:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.MULTILINE | re.DOTALL)
+
+    # 冒頭の空行を除去
+    cleaned = re.sub(r'^\s*\n+', '', cleaned)
+
+    return cleaned.strip()
 
 
 def init_session_state() -> None:
@@ -189,7 +220,11 @@ def _render_hearing_section(idea: Idea, manual_md: str):
         if i in to_hide_indices:
             continue
         role = "ユーザー" if msg["role"] == "user" else "AI"
-        st.markdown(f"**{role}:** {msg['content']}")
+        content = msg['content']
+        # AI応答の場合は導入部分を除外
+        if msg["role"] == "assistant":
+            content = _clean_ai_message(content)
+        st.markdown(f"**{role}:** {content}")
 
     # Ask next questions (up to 5)
     if st.button("次の質問を提示（最大5件）"):
@@ -206,7 +241,8 @@ def _render_hearing_section(idea: Idea, manual_md: str):
         with st.form(f"qa-form-{idea.id}"):
             selections: list[str] = []
             for i, q in enumerate(pending_questions, start=1):
-                st.markdown(f"Q{i}: {q}")
+                cleaned_q = _clean_ai_message(q)
+                st.markdown(f"Q{i}: {cleaned_q}")
                 choice = st.radio(
                     key=f"ans-{idea.id}-{i}",
                     label="回答",
