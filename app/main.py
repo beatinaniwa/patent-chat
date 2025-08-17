@@ -181,9 +181,8 @@ def edit_idea_form(idea: Idea):
 
 def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bool = False):
     """共通の質問表示ロジック."""
-    # Calculate hearing round based on user messages count
-    user_message_count = sum(1 for msg in idea.messages if msg.get("role") == "user")
-    hearing_round = user_message_count + 1
+    # Hearing round equals draft version
+    hearing_round = idea.draft_version
 
     st.subheader(f"AI ヒアリング（第{hearing_round}回）")
 
@@ -240,15 +239,28 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
     if any(i not in to_hide_indices for i in range(len(idea.messages))):
         if show_questions_first:
             st.markdown("**これまでの質問と回答**")
-        for i, msg in enumerate(idea.messages):
+
+        # Display Q&A pairs (question: answer on same line)
+        i = 0
+        while i < len(idea.messages):
             if i in to_hide_indices:
+                i += 1
                 continue
-            role = "ユーザー" if msg["role"] == "user" else "AI"
-            content = msg['content']
-            # AI応答の場合は導入部分を除外
+
+            msg = idea.messages[i]
             if msg["role"] == "assistant":
-                content = _clean_ai_message(content)
-            st.markdown(f"**{role}:** {content}")
+                question = _clean_ai_message(msg['content'])
+                # Check if next message is user's answer
+                if i + 1 < len(idea.messages) and idea.messages[i + 1]["role"] == "user":
+                    answer = idea.messages[i + 1]['content']
+                    st.markdown(f"{question}: {answer}")
+                    i += 2  # Skip both question and answer
+                else:
+                    # Unanswered question (should be in pending_questions)
+                    i += 1
+            else:
+                # Standalone user message (shouldn't happen in normal flow)
+                i += 1
 
     # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
     if not show_questions_first and pending_questions:
@@ -378,12 +390,24 @@ def hearing_ui(idea: Idea):
 
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
-            for msg in idea.messages:
-                role = "ユーザー" if msg["role"] == "user" else "AI"
-                content = msg['content']
+            # Display Q&A pairs (question: answer on same line)
+            i = 0
+            while i < len(idea.messages):
+                msg = idea.messages[i]
                 if msg["role"] == "assistant":
-                    content = _clean_ai_message(content)
-                st.markdown(f"**{role}:** {content}")
+                    question = _clean_ai_message(msg['content'])
+                    # Check if next message is user's answer
+                    if i + 1 < len(idea.messages) and idea.messages[i + 1]["role"] == "user":
+                        answer = idea.messages[i + 1]['content']
+                        st.markdown(f"{question}: {answer}")
+                        i += 2  # Skip both question and answer
+                    else:
+                        # Unanswered question
+                        st.markdown(f"{question}: (未回答)")
+                        i += 1
+                else:
+                    # Standalone user message (shouldn't happen in normal flow)
+                    i += 1
 
     # Non-final version display
     elif idea.draft_version == 1:

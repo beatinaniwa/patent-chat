@@ -16,12 +16,13 @@ class TestHearingCount:
     """Test cases for hearing count display."""
 
     def test_calculate_hearing_round(self):
-        """Test that hearing round is calculated correctly from user messages."""
+        """Test that hearing round equals draft version."""
         idea = Idea(
             id="test",
             title="Test",
             category="test",
             description="test",
+            draft_version=2,  # Second version
             messages=[
                 {"role": "assistant", "content": "質問1？"},
                 {"role": "user", "content": "はい"},
@@ -31,11 +32,9 @@ class TestHearingCount:
             ],
         )
 
-        # Count user messages (each user message represents a completed hearing round)
-        user_count = sum(1 for msg in idea.messages if msg.get("role") == "user")
-        # Next round is user_count + 1
-        hearing_round = user_count + 1
-        assert hearing_round == 3, "Should be 3rd hearing round"
+        # Hearing round should equal draft version
+        hearing_round = idea.draft_version
+        assert hearing_round == 2, "Should be 2nd hearing round for version 2"
 
     def test_hearing_round_with_no_messages(self):
         """Test hearing round when no messages exist."""
@@ -44,11 +43,11 @@ class TestHearingCount:
             title="Test",
             category="test",
             description="test",
+            draft_version=1,  # First version
             messages=[],
         )
 
-        user_count = sum(1 for msg in idea.messages if msg.get("role") == "user")
-        hearing_round = user_count + 1
+        hearing_round = idea.draft_version
         assert hearing_round == 1, "Should be 1st hearing round"
 
     def test_hearing_round_with_only_assistant_messages(self):
@@ -58,14 +57,14 @@ class TestHearingCount:
             title="Test",
             category="test",
             description="test",
+            draft_version=1,  # First version
             messages=[
                 {"role": "assistant", "content": "質問1？"},
                 {"role": "assistant", "content": "質問2？"},
             ],
         )
 
-        user_count = sum(1 for msg in idea.messages if msg.get("role") == "user")
-        hearing_round = user_count + 1
+        hearing_round = idea.draft_version
         assert hearing_round == 1, "Should be 1st hearing round"
 
     @patch("app.main.st")
@@ -79,6 +78,7 @@ class TestHearingCount:
             category="test",
             description="test",
             draft_spec_markdown="draft",
+            draft_version=3,  # Third version
             messages=[
                 {"role": "assistant", "content": "質問1？"},
                 {"role": "user", "content": "はい"},
@@ -103,6 +103,56 @@ class TestHearingCount:
         assert any(
             "第3回" in call for call in subheader_calls
         ), "Hearing count should be displayed as '第3回'"
+
+
+class TestQAHistoryFormat:
+    """Test cases for Q&A history display format."""
+
+    @patch("app.main.st")
+    def test_qa_history_format(self, mock_st):
+        """Test that Q&A history is displayed in correct format."""
+        from app.main import _render_hearing_section
+
+        idea = Idea(
+            id="test",
+            title="Test",
+            category="test",
+            description="test",
+            draft_spec_markdown="draft",
+            draft_version=2,
+            messages=[
+                {"role": "assistant", "content": "質問1ですか？"},
+                {"role": "user", "content": "はい"},
+                {"role": "assistant", "content": "質問2ですか？"},
+                {"role": "user", "content": "いいえ"},
+                {"role": "assistant", "content": "質問3ですか？"},  # Unanswered
+            ],
+        )
+
+        # Mock form context manager
+        mock_form = MagicMock()
+        mock_form.__enter__ = MagicMock(return_value=mock_form)
+        mock_form.__exit__ = MagicMock(return_value=None)
+        mock_st.form.return_value = mock_form
+        mock_st.form_submit_button.return_value = False
+
+        _render_hearing_section(idea, "manual_md", show_questions_first=False)
+
+        # Check markdown calls for Q&A history
+        markdown_calls = [str(call) for call in mock_st.markdown.call_args_list]
+
+        # Should show question and answer on same line without "AI:" or "ユーザー:"
+        assert any(
+            "質問1ですか？: はい" in call for call in markdown_calls
+        ), "Q&A should be displayed as 'Question: Answer' format"
+        assert any(
+            "質問2ですか？: いいえ" in call for call in markdown_calls
+        ), "Q&A should be displayed as 'Question: Answer' format"
+
+        # Should not have "AI:" or "ユーザー:" prefixes
+        assert not any(
+            "AI:" in call or "ユーザー:" in call for call in markdown_calls
+        ), "Should not display 'AI:' or 'ユーザー:' prefixes"
 
 
 class TestDefaultAnswerSelection:
