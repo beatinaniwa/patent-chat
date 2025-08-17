@@ -135,56 +135,8 @@ def edit_idea_form(idea: Idea):
         st.success("更新しました。")
 
 
-def hearing_ui(idea: Idea):
-    manual_md = _load_instruction_markdown()
-
-    # Ensure draft exists
-    if not idea.draft_spec_markdown:
-        with st.spinner("初期ドラフト生成中…"):
-            idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
-            save_ideas(st.session_state.ideas)
-
-    # Auto-generate initial questions if none exist yet (up to 5)
-    if not any(m.get("role") == "assistant" for m in idea.messages):
-        with st.spinner("初回質問を準備中…"):
-            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
-            for q in qs:
-                append_assistant_message(idea.messages, q)
-            save_ideas(st.session_state.ideas)
-        st.rerun()
-
-    # 1) Draft first
-    st.subheader(f"ドラフト（第{idea.draft_version}版）")
-    st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-
-    with st.expander("ドラフトを編集"):
-        edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=360)
-        if st.button("編集内容を保存"):
-            idea.draft_spec_markdown = edited
-            save_ideas(st.session_state.ideas)
-            st.success("保存しました。")
-
-    # Export
-    c1, c2 = st.columns(2)
-    name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
-    c1.download_button(
-        "Word を保存",
-        data=data_docx,
-        file_name=name_docx,
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        use_container_width=True,
-    )
-    name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
-    c2.download_button(
-        "PDF を保存",
-        data=data_pdf,
-        file_name=name_pdf,
-        mime="application/pdf",
-        use_container_width=True,
-    )
-
-    st.divider()
-    # 2) Hearing below
+def _render_hearing_section(idea: Idea, manual_md: str):
+    """共通の質問表示ロジック."""
     st.subheader("AI ヒアリング")
 
     # Collect consecutive assistant messages at the tail (unanswered)
@@ -285,6 +237,71 @@ def hearing_ui(idea: Idea):
                         append_assistant_message(idea.messages, q)
                     save_ideas(st.session_state.ideas)
                 st.rerun()
+
+
+def hearing_ui(idea: Idea):
+    manual_md = _load_instruction_markdown()
+
+    # Ensure draft exists
+    if not idea.draft_spec_markdown:
+        with st.spinner("初期ドラフト生成中…"):
+            idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
+            save_ideas(st.session_state.ideas)
+
+    # Auto-generate initial questions if none exist yet (up to 5)
+    if not any(m.get("role") == "assistant" for m in idea.messages):
+        with st.spinner("初回質問を準備中…"):
+            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
+            for q in qs:
+                append_assistant_message(idea.messages, q)
+            save_ideas(st.session_state.ideas)
+        st.rerun()
+
+    # 初版と2版以降で表示を分ける
+    if idea.draft_version == 1:
+        # 初版: 質問優先レイアウト
+        _render_hearing_section(idea, manual_md)
+
+        # ドラフトは折りたたみで表示
+        with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+        # 初版では編集・エクスポート機能なし
+
+    else:
+        # 2版以降: 現在のレイアウト維持
+        # 1) Draft first
+        st.subheader(f"ドラフト（第{idea.draft_version}版）")
+        st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+
+        with st.expander("ドラフトを編集"):
+            edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=360)
+            if st.button("編集内容を保存"):
+                idea.draft_spec_markdown = edited
+                save_ideas(st.session_state.ideas)
+                st.success("保存しました。")
+
+        # Export
+        c1, c2 = st.columns(2)
+        name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
+        c1.download_button(
+            "Word を保存",
+            data=data_docx,
+            file_name=name_docx,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+        name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
+        c2.download_button(
+            "PDF を保存",
+            data=data_pdf,
+            file_name=name_pdf,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+
+        st.divider()
+        # 2) Hearing below
+        _render_hearing_section(idea, manual_md)
 
 
 def main():
