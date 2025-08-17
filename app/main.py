@@ -15,7 +15,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.export import export_docx, export_pdf
-from app.llm import bootstrap_spec, generate_title, next_questions, refine_spec
+from app.llm import (
+    bootstrap_spec,
+    check_spec_completeness,
+    generate_title,
+    next_questions,
+    refine_spec,
+)
 from app.spec_builder import append_assistant_message, append_user_answer
 from app.state import AppState, Idea
 from app.storage import delete_idea, get_idea, load_ideas, save_ideas
@@ -133,7 +139,14 @@ def new_idea_form():
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
-            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
+            qs = next_questions(
+                manual_md,
+                idea.messages,
+                idea.draft_spec_markdown,
+                num_questions=5,
+                version=idea.draft_version,
+                is_final=idea.is_final,
+            )
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)
@@ -166,7 +179,7 @@ def edit_idea_form(idea: Idea):
         st.success("更新しました。")
 
 
-def _render_hearing_section(idea: Idea, manual_md: str):
+def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bool = False):
     """共通の質問表示ロジック."""
     st.subheader("AI ヒアリング")
 
@@ -215,55 +228,83 @@ def _render_hearing_section(idea: Idea, manual_md: str):
             to_hide_indices.add(idx)
             ptr += 1
 
+    # For version 2+, show questions first if requested
+    if show_questions_first and pending_questions:
+        _render_pending_questions(idea, pending_questions, manual_md)
+
     # Conversation history (exclude pending questions to avoid duplication)
-    for i, msg in enumerate(idea.messages):
-        if i in to_hide_indices:
-            continue
-        role = "ユーザー" if msg["role"] == "user" else "AI"
-        content = msg['content']
-        # AI応答の場合は導入部分を除外
-        if msg["role"] == "assistant":
-            content = _clean_ai_message(content)
-        st.markdown(f"**{role}:** {content}")
+    if any(i not in to_hide_indices for i in range(len(idea.messages))):
+        if show_questions_first:
+            st.markdown("**これまでの質問と回答**")
+        for i, msg in enumerate(idea.messages):
+            if i in to_hide_indices:
+                continue
+            role = "ユーザー" if msg["role"] == "user" else "AI"
+            content = msg['content']
+            # AI応答の場合は導入部分を除外
+            if msg["role"] == "assistant":
+                content = _clean_ai_message(content)
+            st.markdown(f"**{role}:** {content}")
 
     # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
-    if pending_questions:
-        st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
-        with st.form(f"qa-form-{idea.id}"):
-            selections: list[str] = []
-            for i, q in enumerate(pending_questions, start=1):
-                cleaned_q = _clean_ai_message(q)
-                st.markdown(f"Q{i}: {cleaned_q}")
-                choice = st.radio(
-                    key=f"ans-{idea.id}-{i}",
-                    label="回答",
-                    options=["はい", "いいえ", "わからない"],
-                    index=2,
-                    horizontal=True,
+    if not show_questions_first and pending_questions:
+        _render_pending_questions(idea, pending_questions, manual_md)
+
+
+def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_md: str):
+    """Render pending questions form."""
+    st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
+    with st.form(f"qa-form-{idea.id}"):
+        selections: list[str] = []
+        for i, q in enumerate(pending_questions, start=1):
+            cleaned_q = _clean_ai_message(q)
+            st.markdown(f"Q{i}: {cleaned_q}")
+            choice = st.radio(
+                key=f"ans-{idea.id}-{i}",
+                label="回答",
+                options=["はい", "いいえ", "わからない"],
+                index=2,
+                horizontal=True,
+            )
+            selections.append(choice)
+        submitted = st.form_submit_button("回答をまとめて送信", type="primary")
+        if submitted:
+            for ans in selections:
+                append_user_answer(idea.messages, ans)
+            with st.spinner("ドラフト更新中…"):
+                idea.draft_spec_markdown = refine_spec(
+                    manual_md, idea.messages, idea.draft_spec_markdown
                 )
-                selections.append(choice)
-            submitted = st.form_submit_button("回答をまとめて送信", type="primary")
-            if submitted:
-                for ans in selections:
-                    append_user_answer(idea.messages, ans)
-                with st.spinner("ドラフト更新中…"):
-                    idea.draft_spec_markdown = refine_spec(
-                        manual_md, idea.messages, idea.draft_spec_markdown
+                idea.draft_version += 1
+
+                # Check if this should be the final version
+                if idea.draft_version >= 5:
+                    idea.is_final = True
+                else:
+                    # Check completeness for versions 2-4
+                    is_complete, score = check_spec_completeness(
+                        manual_md, idea.draft_spec_markdown, idea.draft_version
                     )
-                    idea.draft_version += 1
-                    save_ideas(st.session_state.ideas)
-                # 新版表示後に次の質問を自動提示
+                    if is_complete:
+                        idea.is_final = True
+
+                save_ideas(st.session_state.ideas)
+
+            # Generate next questions only if not final
+            if not idea.is_final:
                 with st.spinner("次の質問を準備中…"):
                     qs2 = next_questions(
                         manual_md,
                         idea.messages,
                         idea.draft_spec_markdown,
                         num_questions=5,
+                        version=idea.draft_version,
+                        is_final=idea.is_final,
                     )
                     for q in qs2:
                         append_assistant_message(idea.messages, q)
                     save_ideas(st.session_state.ideas)
-                st.rerun()
+            st.rerun()
 
 
 def hearing_ui(idea: Idea):
@@ -276,59 +317,112 @@ def hearing_ui(idea: Idea):
             save_ideas(st.session_state.ideas)
 
     # Auto-generate initial questions if none exist yet (up to 5)
-    if not any(m.get("role") == "assistant" for m in idea.messages):
+    if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
-            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
+            qs = next_questions(
+                manual_md,
+                idea.messages,
+                idea.draft_spec_markdown,
+                num_questions=5,
+                version=idea.draft_version,
+                is_final=idea.is_final,
+            )
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)
         st.rerun()
 
-    # 初版と2版以降で表示を分ける
-    if idea.draft_version == 1:
-        # 初版: 質問優先レイアウト
-        _render_hearing_section(idea, manual_md)
+    # Handle final version display
+    if idea.is_final:
+        version_label = f"第{idea.draft_version}版（最終版）"
+        st.subheader(f"特許明細書 - {version_label}")
+        st.info("✅ 明細書が完成しました。以下から編集・ダウンロードが可能です。")
 
-        # ドラフトは折りたたみで表示
-        with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
-            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-        # 初版では編集・エクスポート機能なし
-
-    else:
-        # 2版以降: 現在のレイアウト維持
-        # 1) Draft first
-        st.subheader(f"ドラフト（第{idea.draft_version}版）")
+        # Show full draft expanded for final version
         st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
-        with st.expander("ドラフトを編集"):
-            edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=360)
+        # Edit and export options
+        with st.expander("明細書を編集"):
+            edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=500)
             if st.button("編集内容を保存"):
                 idea.draft_spec_markdown = edited
                 save_ideas(st.session_state.ideas)
                 st.success("保存しました。")
 
-        # Export
+        # Export buttons
+        st.markdown("### エクスポート")
         c1, c2 = st.columns(2)
         name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
         c1.download_button(
-            "Word を保存",
+            "📝 Word でダウンロード",
             data=data_docx,
             file_name=name_docx,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True,
+            type="primary",
         )
         name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
         c2.download_button(
-            "PDF を保存",
+            "📄 PDF でダウンロード",
             data=data_pdf,
             file_name=name_pdf,
             mime="application/pdf",
             use_container_width=True,
+            type="primary",
         )
 
+        # Show Q&A history at the bottom
+        with st.expander("質疑応答履歴", expanded=False):
+            for msg in idea.messages:
+                role = "ユーザー" if msg["role"] == "user" else "AI"
+                content = msg['content']
+                if msg["role"] == "assistant":
+                    content = _clean_ai_message(content)
+                st.markdown(f"**{role}:** {content}")
+
+    # Non-final version display
+    elif idea.draft_version == 1:
+        # Version 1: Questions first layout
+        _render_hearing_section(idea, manual_md, show_questions_first=False)
+
+        # Draft in collapsed expander
+        with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+
+    else:
+        # Version 2-4: New layout - questions first, then history, then draft
+        st.subheader("AI ヒアリング")
+
+        # Show questions first, then Q&A history
+        _render_hearing_section(idea, manual_md, show_questions_first=True)
+
         st.divider()
-        # 2) Hearing below
-        _render_hearing_section(idea, manual_md)
+
+        # Draft at bottom (collapsed)
+        version_label = f"第{idea.draft_version}版"
+        with st.expander(f"生成された明細書ドラフト（{version_label}）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+
+            # Limited export for non-final versions
+            st.markdown("---")
+            st.caption("※ ドラフトのエクスポート（現在の状態）")
+            c1, c2 = st.columns(2)
+            name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
+            c1.download_button(
+                "Word を保存",
+                data=data_docx,
+                file_name=name_docx,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+            name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
+            c2.download_button(
+                "PDF を保存",
+                data=data_pdf,
+                file_name=name_pdf,
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
 
 def main():

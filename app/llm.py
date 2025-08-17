@@ -114,7 +114,13 @@ def next_questions(
     transcript: List[Dict[str, str]],
     current_spec_md: str,
     num_questions: int = 3,
+    version: int = 1,
+    is_final: bool = False,
 ) -> List[str]:
+    # Don't generate questions if already finalized or at version 5
+    if is_final or version >= 5:
+        return []
+
     client = _get_client()
     if client is None:
         return [
@@ -273,3 +279,83 @@ def _derive_sections_from_instruction(instruction_md: str) -> List[str]:
         if len(sections) >= 12:
             break
     return sections
+
+
+def check_spec_completeness(
+    instruction_md: str, current_spec_md: str, version: int
+) -> tuple[bool, float]:
+    """
+    Check if the specification is complete enough to be finalized.
+
+    Returns:
+        tuple: (is_complete, score) where is_complete is True if ready to finalize,
+               and score is a completeness percentage (0-100)
+    """
+    # Version 5 is always final
+    if version >= 5:
+        return True, 100.0
+
+    # For earlier versions, check quality
+    client = _get_client()
+    if client is None:
+        # If no client, use simple heuristics
+        has_placeholders = "未記載" in current_spec_md
+        spec_length = len(current_spec_md)
+        # Simple scoring: no placeholders and reasonable length
+        if not has_placeholders and spec_length > 3000:
+            score = min(100, 70 + (spec_length - 3000) / 100)
+            return score >= 85, score
+        return False, 50.0 if has_placeholders else 60.0
+
+    system = (
+        "あなたは特許明細書の品質評価専門家です。指示書のチェックリストに基づいて、"
+        "現在のドラフトの完成度を評価してください。"
+    )
+    prompt = (
+        f"[指示書の最終チェックリスト]\n{instruction_md}\n\n"
+        f"[現行ドラフト]\n{current_spec_md}\n\n"
+        "[評価要件]\n"
+        "以下の観点で0-100のスコアを1つだけ出力してください（数値のみ）：\n"
+        "- 発明の本質が捉えられているか（20点）\n"
+        "- 従来技術との差分が明確か（20点）\n"
+        "- 実施可能要件を満たしているか（20点）\n"
+        "- クレーム設計が適切か（20点）\n"
+        "- 未記載箇所がないか（20点）\n"
+    )
+
+    try:
+        model_name = _model_name()
+        logger.info(
+            "check_spec_completeness: calling model=%s, version=%d, draft_len=%d",
+            model_name,
+            version,
+            len(current_spec_md or ""),
+        )
+        resp = client.models.generate_content(
+            model=model_name,
+            contents=f"{system}\n\n{prompt}",
+        )
+        _log_response_debug("check_spec_completeness", resp)
+        text = (resp.text or "").strip()
+
+        # Extract numeric score
+        try:
+            score = float(re.search(r'\d+(?:\.\d+)?', text).group())
+            score = min(100, max(0, score))  # Clamp to 0-100
+        except (AttributeError, ValueError):
+            logger.warning("check_spec_completeness: Could not parse score, using default")
+            score = 70.0
+
+        # Consider complete if score >= 85
+        is_complete = score >= 85
+        return is_complete, score
+
+    except Exception:
+        logger.exception("check_spec_completeness: API error, using fallback")
+        # Fallback: check for placeholders and length
+        has_placeholders = "未記載" in current_spec_md
+        spec_length = len(current_spec_md)
+        if not has_placeholders and spec_length > 3000:
+            score = min(100, 70 + (spec_length - 3000) / 100)
+            return score >= 85, score
+        return False, 50.0 if has_placeholders else 60.0
