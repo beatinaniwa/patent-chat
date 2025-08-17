@@ -226,15 +226,6 @@ def _render_hearing_section(idea: Idea, manual_md: str):
             content = _clean_ai_message(content)
         st.markdown(f"**{role}:** {content}")
 
-    # Ask next questions (up to 5)
-    if st.button("次の質問を提示（最大5件）"):
-        with st.spinner("質問を準備中…"):
-            qs = next_questions(manual_md, idea.messages, idea.draft_spec_markdown, num_questions=5)
-            for q in qs:
-                append_assistant_message(idea.messages, q)
-            save_ideas(st.session_state.ideas)
-            st.rerun()
-
     # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
     if pending_questions:
         st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
