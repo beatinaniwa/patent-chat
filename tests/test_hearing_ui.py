@@ -43,9 +43,9 @@ class TestHearingUIDisplay:
                 hearing_ui(idea)
 
         # Assert
-        # 1. AIヒアリングのsubheaderが最初に呼ばれる
+        # 1. AIヒアリングのsubheaderが最初に呼ばれる（回数付き）
         subheader_calls = [
-            call for call in mock_st.subheader.call_args_list if call[0][0] == "AI ヒアリング"
+            str(call) for call in mock_st.subheader.call_args_list if "AI ヒアリング" in str(call)
         ]
         assert len(subheader_calls) > 0, "AI ヒアリングのサブヘッダーが表示されていない"
 

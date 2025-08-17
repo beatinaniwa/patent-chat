@@ -181,7 +181,11 @@ def edit_idea_form(idea: Idea):
 
 def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bool = False):
     """共通の質問表示ロジック."""
-    st.subheader("AI ヒアリング")
+    # Calculate hearing round based on user messages count
+    user_message_count = sum(1 for msg in idea.messages if msg.get("role") == "user")
+    hearing_round = user_message_count + 1
+
+    st.subheader(f"AI ヒアリング（第{hearing_round}回）")
 
     # Collect consecutive assistant messages at the tail (unanswered)
     tail_assistant: list[str] = []
@@ -259,11 +263,12 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
         for i, q in enumerate(pending_questions, start=1):
             cleaned_q = _clean_ai_message(q)
             st.markdown(f"Q{i}: {cleaned_q}")
+            # Use draft version in key to ensure fresh state for each round
             choice = st.radio(
-                key=f"ans-{idea.id}-{i}",
+                key=f"ans-{idea.id}-v{idea.draft_version}-{i}",
                 label="回答",
                 options=["はい", "いいえ", "わからない"],
-                index=2,
+                index=2,  # Default to "わからない"
                 horizontal=True,
             )
             selections.append(choice)
