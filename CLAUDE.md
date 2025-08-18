@@ -122,7 +122,8 @@ uv run pytest -k "test_pattern" -v
   - `generate_title()`: Creates concise titles from idea descriptions (uses flash model for speed)
   - `bootstrap_spec()`: Generates initial patent draft from idea and instruction document
   - `next_questions()`: Generates 3-5 yes/no questions based on draft and instructions
-  - `refine_spec()`: Updates draft based on user answers to questions
+  - `regenerate_spec()`: Regenerates entire draft from scratch using idea, Q&A history, and instructions (v2+)
+  - `refine_spec()`: Updates draft based on user answers to questions (deprecated, kept for compatibility)
   - Includes fallback logic when API is unavailable
 
 - **app/storage.py**: JSON-based persistence layer for ideas in `data/ideas.json`
@@ -147,9 +148,9 @@ Required in `.env` file:
 ## Workflow
 
 1. User creates new idea → Title generated → Initial draft created → First questions generated
-2. User answers questions (yes/no radio buttons) → Draft automatically regenerates
+2. User answers questions (yes/no radio buttons) → Draft completely regenerates from all information
 3. Draft displayed above, Q&A hearing section below
-4. Each answer triggers draft refinement and new question generation
+4. Each answer triggers full draft regeneration and new question generation
 5. User can export final draft to Word/PDF
 
 ## Important Patterns

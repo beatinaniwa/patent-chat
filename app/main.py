@@ -20,7 +20,7 @@ from app.llm import (
     check_spec_completeness,
     generate_title,
     next_questions,
-    refine_spec,
+    regenerate_spec,
 )
 from app.spec_builder import append_assistant_message, append_user_answer
 from app.state import AppState, Idea
@@ -284,8 +284,8 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             for ans in selections:
                 append_user_answer(idea.messages, ans)
             with st.spinner("ドラフト更新中…"):
-                idea.draft_spec_markdown = refine_spec(
-                    manual_md, idea.messages, idea.draft_spec_markdown
+                idea.draft_spec_markdown = regenerate_spec(
+                    manual_md, idea.description, idea.messages
                 )
                 idea.draft_version += 1
 
