@@ -186,6 +186,48 @@ def edit_idea_form(idea: Idea):
         st.success("更新しました。")
 
 
+def _calculate_question_start_number(idea: Idea) -> int:
+    """Calculate the starting number for questions based on all previous questions."""
+    # Count all assistant messages that are questions (answered or not)
+    question_count = 0
+    for msg in idea.messages:
+        if msg.get("role") == "assistant":
+            # Simple heuristic: if it contains "？" or "?", it's likely a question
+            content = msg.get("content", "")
+            if "？" in content or "?" in content:
+                question_count += 1
+
+    # If we're on the first version or no questions yet, start from 1
+    if question_count == 0:
+        return 1
+
+    # Count only answered questions (pairs of assistant followed by user)
+    answered_count = 0
+    i = 0
+    while i < len(idea.messages):
+        # Look for assistant messages
+        if i < len(idea.messages) and idea.messages[i].get("role") == "assistant":
+            # Check if there's at least one user answer after this batch of questions
+            j = i
+            # Skip all consecutive assistant messages
+            while j < len(idea.messages) and idea.messages[j].get("role") == "assistant":
+                j += 1
+            # Now j points to first non-assistant message or end
+            # Check if there are user messages
+            if j < len(idea.messages) and idea.messages[j].get("role") == "user":
+                # Count the assistant messages in this batch as answered
+                for k in range(i, j):
+                    content = idea.messages[k].get("content", "")
+                    if "？" in content or "?" in content:
+                        answered_count += 1
+            i = j
+        else:
+            i += 1
+
+    # Start numbering from answered_count + 1
+    return answered_count + 1
+
+
 def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bool = False):
     """共通の質問表示ロジック."""
     # Hearing round equals draft version
@@ -296,7 +338,9 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
     st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
     with st.form(f"qa-form-{idea.id}"):
         selections: list[str] = []
-        for i, q in enumerate(pending_questions, start=1):
+        # Calculate the starting question number based on all previous questions
+        start_num = _calculate_question_start_number(idea)
+        for i, q in enumerate(pending_questions, start=start_num):
             cleaned_q = _clean_ai_message(q)
             st.markdown(f"Q{i}: {cleaned_q}")
             # Use draft version in key to ensure fresh state for each round
