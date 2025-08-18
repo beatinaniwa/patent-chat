@@ -57,7 +57,7 @@ class TestQuestionGeneration(unittest.TestCase):
         mock_client.return_value = MagicMock()
 
         # Test with is_final=True
-        questions = next_questions(
+        questions, error = next_questions(
             instruction_md="test",
             transcript=[],
             current_spec_md="test draft",
@@ -66,6 +66,7 @@ class TestQuestionGeneration(unittest.TestCase):
             is_final=True,
         )
         self.assertEqual(questions, [])
+        self.assertIsNone(error)
 
     @patch('app.llm._get_client')
     def test_no_questions_at_version_5(self, mock_client):
@@ -73,7 +74,7 @@ class TestQuestionGeneration(unittest.TestCase):
         mock_client.return_value = MagicMock()
 
         # Test with version=5
-        questions = next_questions(
+        questions, error = next_questions(
             instruction_md="test",
             transcript=[],
             current_spec_md="test draft",
@@ -82,6 +83,7 @@ class TestQuestionGeneration(unittest.TestCase):
             is_final=False,
         )
         self.assertEqual(questions, [])
+        self.assertIsNone(error)
 
     @patch('app.llm._get_client')
     def test_questions_generated_before_final(self, mock_client):
@@ -89,7 +91,7 @@ class TestQuestionGeneration(unittest.TestCase):
         mock_client.return_value = None  # Use fallback questions
 
         # Test with version=2, is_final=False
-        questions = next_questions(
+        questions, error = next_questions(
             instruction_md="test",
             transcript=[],
             current_spec_md="test draft",
@@ -97,6 +99,7 @@ class TestQuestionGeneration(unittest.TestCase):
             version=2,
             is_final=False,
         )
+        self.assertIsNotNone(error)  # Has error because mock_client is None
         self.assertGreater(len(questions), 0)
         self.assertLessEqual(len(questions), 3)
 
@@ -209,7 +212,7 @@ class TestVersionLimits(unittest.TestCase):
         mock_client.return_value = MagicMock()
 
         for version in [5, 6, 10]:
-            questions = next_questions(
+            questions, error = next_questions(
                 instruction_md="test",
                 transcript=[],
                 current_spec_md="test",
@@ -217,6 +220,7 @@ class TestVersionLimits(unittest.TestCase):
                 is_final=False,
             )
             self.assertEqual(questions, [], f"Version {version} should generate no questions")
+            self.assertIsNone(error)
 
 
 if __name__ == "__main__":

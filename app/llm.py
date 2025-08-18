@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
 
@@ -21,6 +21,29 @@ if not logger.handlers:
 
 def _model_name() -> str:
     return os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME)
+
+
+def _classify_api_error(e: Exception) -> str:
+    """エラーを分類してユーザーフレンドリーなメッセージを返す"""
+    error_str = str(e).lower()
+
+    if "api_key" in error_str or "api key" in error_str or "unauthorized" in error_str:
+        return (
+            "APIキーの設定を確認してください。"
+            ".envファイルにGOOGLE_API_KEYまたはGEMINI_API_KEYを設定してください"
+        )
+    elif "rate" in error_str and "limit" in error_str or "quota" in error_str:
+        return "API利用制限に達しました。しばらく待ってから再試行してください"
+    elif "network" in error_str or "connection" in error_str:
+        return "ネットワーク接続を確認してください"
+    elif "timeout" in error_str:
+        return "応答がタイムアウトしました。再試行してください"
+    elif "invalid" in error_str and "response" in error_str:
+        return "APIから予期しない応答を受け取りました。再試行してください"
+    else:
+        # エラーメッセージの最初の100文字を表示
+        error_msg = str(e)[:200] if str(e) else "不明なエラー"
+        return f"予期しないエラーが発生しました: {error_msg}"
 
 
 def _title_model_name() -> str:
@@ -72,11 +95,12 @@ def generate_title(idea_description: str) -> str:
         return (idea_description.strip().splitlines()[0] or "新規アイデア")[:30]
 
 
-def bootstrap_spec(sample_manual_md: str, idea_description: str) -> str:
+def bootstrap_spec(sample_manual_md: str, idea_description: str) -> Tuple[str, Optional[str]]:
     client = _get_client()
     if client is None:
+        error_msg = "APIクライアントの初期化に失敗しました。APIキーの設定を確認してください"
         logger.warning("bootstrap_spec: No client; generating fallback skeleton.")
-        return _fallback_skeleton(sample_manual_md, idea_description)
+        return _fallback_skeleton(sample_manual_md, idea_description), error_msg
     system = (
         "あなたは特許明細書の下書きを作る専門家です。与えられた指示書（プロンプト）を最優先で参照し、"
         "不足部分は'未記載'と明示しつつ、Markdownで初稿を作ってください。"
@@ -101,12 +125,14 @@ def bootstrap_spec(sample_manual_md: str, idea_description: str) -> str:
         _log_response_debug("bootstrap_spec", resp)
         text = (resp.text or "").strip()
         if not text:
+            error_msg = "APIから空の応答を受け取りました。再試行してください"
             logger.error("bootstrap_spec: Empty response text; using fallback skeleton.")
-            return _fallback_skeleton(sample_manual_md, idea_description)
-        return text
-    except Exception:
+            return _fallback_skeleton(sample_manual_md, idea_description), error_msg
+        return text, None
+    except Exception as e:
+        error_msg = _classify_api_error(e)
         logger.exception("bootstrap_spec: Gemini API error; using fallback skeleton.")
-        return _fallback_skeleton(sample_manual_md, idea_description)
+        return _fallback_skeleton(sample_manual_md, idea_description), error_msg
 
 
 def next_questions(
@@ -116,18 +142,19 @@ def next_questions(
     num_questions: int = 3,
     version: int = 1,
     is_final: bool = False,
-) -> List[str]:
+) -> Tuple[List[str], Optional[str]]:
     # Don't generate questions if already finalized or at version 5
     if is_final or version >= 5:
-        return []
+        return [], None
 
     client = _get_client()
     if client is None:
+        error_msg = "API接続に失敗したため、標準的な質問を使用します"
         return [
             "現行ドラフトに未記載箇所があります。図面は必要ですか？（はい/いいえ）",
             "実施例は複数のバリエーションがありますか？（はい/いいえ）",
             "発明の効果に定量的根拠はありますか？（はい/いいえ）",
-        ][:num_questions]
+        ][:num_questions], error_msg
 
     transcript_str = "\n".join([f"{m['role']}: {m['content']}" for m in transcript][-20:])
     system = (
@@ -165,15 +192,16 @@ def next_questions(
         )
         _log_response_debug("next_questions", resp)
         text = resp.text or ""
-    except Exception:
+    except Exception as e:
+        error_msg = _classify_api_error(e)
         logger.exception("next_questions: Gemini API error; using canned questions.")
         return [
             "課題の技術的背景は十分に記載されていますか？（はい/いいえ）",
             "構成要件の必須/任意が明確ですか？（はい/いいえ）",
             "変形例はありますか？（はい/いいえ）",
-        ][:num_questions]
+        ][:num_questions], error_msg
     lines = [line.strip("- ") for line in text.splitlines() if line.strip()]
-    return [line for line in lines if line][:num_questions]
+    return [line for line in lines if line][:num_questions], None
 
 
 def refine_spec(
@@ -219,7 +247,7 @@ def regenerate_spec(
     instruction_md: str,
     idea_description: str,
     transcript: List[Dict[str, str]],
-) -> str:
+) -> Tuple[str, Optional[str]]:
     """
     Regenerate the entire specification from scratch using all available information.
 
@@ -239,8 +267,9 @@ def regenerate_spec(
     """
     client = _get_client()
     if client is None:
+        error_msg = "APIクライアントの初期化に失敗しました。APIキーの設定を確認してください"
         logger.warning("regenerate_spec: No client; generating fallback skeleton.")
-        return _fallback_skeleton(instruction_md, idea_description)
+        return _fallback_skeleton(instruction_md, idea_description), error_msg
 
     # Format Q&A history for better understanding
     # Simple approach: collect all questions and answers in order
@@ -328,12 +357,14 @@ def regenerate_spec(
         _log_response_debug("regenerate_spec", resp)
         text = (resp.text or "").strip()
         if not text:
+            error_msg = "APIから空の応答を受け取りました。再試行してください"
             logger.error("regenerate_spec: Empty response; using fallback skeleton.")
-            return _fallback_skeleton(instruction_md, idea_description)
-        return text
-    except Exception:
+            return _fallback_skeleton(instruction_md, idea_description), error_msg
+        return text, None
+    except Exception as e:
+        error_msg = _classify_api_error(e)
         logger.exception("regenerate_spec: Gemini API error; using fallback skeleton.")
-        return _fallback_skeleton(instruction_md, idea_description)
+        return _fallback_skeleton(instruction_md, idea_description), error_msg
 
 
 def _log_response_debug(operation: str, resp: Any) -> None:

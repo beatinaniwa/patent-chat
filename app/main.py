@@ -135,11 +135,15 @@ def new_idea_form():
 
             status.update(label="初期ドラフト生成中…", state="running")
             manual_md = _load_instruction_markdown()
-            idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
+            spec_result, error_msg = bootstrap_spec(manual_md, idea.description)
+            if error_msg:
+                st.error(f"⚠️ {error_msg}")
+                st.info("基本的な骨格を生成しました。後で再生成を試してください。")
+            idea.draft_spec_markdown = spec_result
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
-            qs = next_questions(
+            qs, q_error = next_questions(
                 manual_md,
                 idea.messages,
                 idea.draft_spec_markdown,
@@ -147,6 +151,9 @@ def new_idea_form():
                 version=idea.draft_version,
                 is_final=idea.is_final,
             )
+            if q_error:
+                st.warning(f"⚠️ 質問生成エラー: {q_error}")
+                st.info("デフォルトの質問を使用します。")
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)
@@ -302,10 +309,13 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             for ans in selections:
                 append_user_answer(idea.messages, ans)
             with st.spinner("ドラフト更新中…"):
-                idea.draft_spec_markdown = regenerate_spec(
-                    manual_md, idea.description, idea.messages
-                )
-                idea.draft_version += 1
+                spec_result, error_msg = regenerate_spec(manual_md, idea.description, idea.messages)
+                if error_msg:
+                    st.error(f"⚠️ {error_msg}")
+                    st.info("前のバージョンを保持します。")
+                else:
+                    idea.draft_spec_markdown = spec_result
+                    idea.draft_version += 1
 
                 # Check if this should be the final version
                 if idea.draft_version >= 5:
@@ -327,9 +337,9 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                 save_ideas(st.session_state.ideas)
 
             # Generate next questions only if not final
-            if not idea.is_final:
+            if not idea.is_final and not error_msg:  # Don't generate questions if error
                 with st.spinner("次の質問を準備中…"):
-                    qs2 = next_questions(
+                    qs2, q_error = next_questions(
                         manual_md,
                         idea.messages,
                         idea.draft_spec_markdown,
@@ -337,6 +347,9 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                         version=idea.draft_version,
                         is_final=idea.is_final,
                     )
+                    if q_error:
+                        st.warning(f"⚠️ 質問生成エラー: {q_error}")
+                        st.info("デフォルトの質問を使用します。")
                     print(f"DEBUG: Generated {len(qs2)} questions for version {idea.draft_version}")
                     for q in qs2:
                         append_assistant_message(idea.messages, q)
@@ -356,13 +369,17 @@ def hearing_ui(idea: Idea):
     # Ensure draft exists
     if not idea.draft_spec_markdown:
         with st.spinner("初期ドラフト生成中…"):
-            idea.draft_spec_markdown = bootstrap_spec(manual_md, idea.description)
+            spec_result, error_msg = bootstrap_spec(manual_md, idea.description)
+            if error_msg:
+                st.error(f"⚠️ {error_msg}")
+                st.info("基本的な骨格を生成しました。")
+            idea.draft_spec_markdown = spec_result
             save_ideas(st.session_state.ideas)
 
     # Auto-generate initial questions if none exist yet (up to 5)
     if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
-            qs = next_questions(
+            qs, q_error = next_questions(
                 manual_md,
                 idea.messages,
                 idea.draft_spec_markdown,
@@ -370,6 +387,9 @@ def hearing_ui(idea: Idea):
                 version=idea.draft_version,
                 is_final=idea.is_final,
             )
+            if q_error:
+                st.warning(f"⚠️ 質問生成エラー: {q_error}")
+                st.info("デフォルトの質問を使用します。")
             for q in qs:
                 append_assistant_message(idea.messages, q)
             save_ideas(st.session_state.ideas)

@@ -23,13 +23,14 @@ class TestSpecRegeneration:
         mock_response.text = "# 特許明細書\n## 発明の名称\nテスト発明"
         mock_client.return_value.models.generate_content.return_value = mock_response
 
-        result = regenerate_spec(
+        result, error = regenerate_spec(
             instruction_md="指示書内容",
             idea_description="アイデアの説明",
             transcript=[],
         )
 
-        # Should return the generated text
+        # Should return the generated text without error
+        assert error is None
         assert "特許明細書" in result
         assert "テスト発明" in result
 
@@ -54,13 +55,14 @@ class TestSpecRegeneration:
             {"role": "user", "content": "いいえ"},
         ]
 
-        result = regenerate_spec(
+        result, error = regenerate_spec(
             instruction_md="指示書内容",
             idea_description="アイデアの説明",
             transcript=transcript,
         )
 
-        # Should return the generated text
+        # Should return the generated text without error
+        assert error is None
         assert "特許明細書" in result
         assert "改良版発明" in result
 
@@ -147,13 +149,15 @@ class TestSpecRegeneration:
         # Mock API error
         mock_client.return_value.models.generate_content.side_effect = Exception("API Error")
 
-        result = regenerate_spec(
+        result, error = regenerate_spec(
             instruction_md="指示書",
             idea_description="アイデア説明",
             transcript=[],
         )
 
-        # Should return fallback skeleton
+        # Should return fallback skeleton with error message
+        assert error is not None
+        assert "エラー" in error or "Error" in error
         assert "特許明細書草案" in result
         assert "アイデア概要" in result
         assert "未記載" in result
@@ -166,26 +170,30 @@ class TestSpecRegeneration:
         mock_response.text = ""
         mock_client.return_value.models.generate_content.return_value = mock_response
 
-        result = regenerate_spec(
+        result, error = regenerate_spec(
             instruction_md="指示書",
             idea_description="アイデア",
             transcript=[],
         )
 
-        # Should return fallback skeleton
+        # Should return fallback skeleton with error message
+        assert error is not None
+        assert "空の応答" in error
         assert "特許明細書草案" in result
         assert "未記載" in result
 
     def test_regenerate_no_client_fallback(self):
         """Test fallback when no client is available."""
         with patch("app.llm._get_client", return_value=None):
-            result = regenerate_spec(
+            result, error = regenerate_spec(
                 instruction_md="指示書",
                 idea_description="アイデア",
                 transcript=[],
             )
 
-            # Should return fallback skeleton
+            # Should return fallback skeleton with error message
+            assert error is not None
+            assert "API" in error
             assert "特許明細書草案" in result
             assert "未記載" in result
 
