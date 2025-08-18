@@ -16,6 +16,8 @@ class Idea:
     draft_spec_markdown: str = ""
     # Draft version counter (1 = 初版)
     draft_version: int = 1
+    # Whether this specification is finalized
+    is_final: bool = False
 
 
 @dataclass

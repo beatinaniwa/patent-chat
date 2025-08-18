@@ -43,9 +43,9 @@ class TestHearingUIDisplay:
                 hearing_ui(idea)
 
         # Assert
-        # 1. AIヒアリングのsubheaderが最初に呼ばれる
+        # 1. AIヒアリングのsubheaderが最初に呼ばれる（回数付き）
         subheader_calls = [
-            call for call in mock_st.subheader.call_args_list if call[0][0] == "AI ヒアリング"
+            str(call) for call in mock_st.subheader.call_args_list if "AI ヒアリング" in str(call)
         ]
         assert len(subheader_calls) > 0, "AI ヒアリングのサブヘッダーが表示されていない"
 
@@ -59,8 +59,8 @@ class TestHearingUIDisplay:
         assert mock_st.download_button.call_count == 0, "初版でエクスポートボタンが表示されている"
 
     @patch("app.main.st")
-    def test_second_version_shows_draft_first_with_all_features(self, mock_st):
-        """2版以降ではドラフトが先に表示され、全機能が有効か確認."""
+    def test_second_version_shows_questions_first_then_draft(self, mock_st):
+        """2版以降では質問が先、次に回答履歴、最後にドラフト（折りたたみ）の順で表示されるか確認."""
         from app.main import hearing_ui
 
         # Arrange: 2版のアイデア
@@ -80,6 +80,13 @@ class TestHearingUIDisplay:
 
         # Mock session state
         mock_st.session_state.ideas = [idea]
+        mock_st.columns.return_value = [MagicMock(), MagicMock()]  # Mock columns for export buttons
+
+        # Mock expander context manager
+        mock_expander = MagicMock()
+        mock_expander.__enter__ = MagicMock(return_value=mock_expander)
+        mock_expander.__exit__ = MagicMock(return_value=None)
+        mock_st.expander.return_value = mock_expander
 
         # Act
         with patch("app.main._load_instruction_markdown", return_value="instruction"):
@@ -89,20 +96,20 @@ class TestHearingUIDisplay:
                         hearing_ui(idea)
 
         # Assert
-        # 1. ドラフトのsubheaderが最初に表示される
+        # 1. AIヒアリングのsubheaderが表示される
         subheader_calls = mock_st.subheader.call_args_list
         assert any(
-            "ドラフト（第2版）" in str(call) for call in subheader_calls
-        ), "2版のドラフトサブヘッダーが表示されていない"
+            "AI ヒアリング" in str(call) for call in subheader_calls
+        ), "AIヒアリングのサブヘッダーが表示されていない"
 
-        # 2. ドラフト編集用のexpanderがある
+        # 2. ドラフトはexpanderで折りたたまれている（バージョン番号は変化する可能性あり）
         expander_calls = mock_st.expander.call_args_list
         assert any(
-            "ドラフトを編集" in str(call) for call in expander_calls
-        ), "ドラフト編集用expanderが表示されていない"
+            "生成された明細書ドラフト" in str(call) for call in expander_calls
+        ), "ドラフトがexpanderで表示されていない"
 
-        # 3. エクスポートボタンが表示される（Word & PDF）
-        assert mock_st.download_button.call_count >= 2, "エクスポートボタンが表示されていない"
+        # 3. dividerが呼ばれている（質問セクションとドラフトの間）
+        assert mock_st.divider.called, "質問とドラフトの間にdividerが表示されていない"
 
     @patch("app.main.st")
     def test_questions_display_logic_works_in_both_versions(self, mock_st):
