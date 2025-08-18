@@ -244,9 +244,6 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
 
     # Conversation history (exclude pending questions to avoid duplication)
     if any(i not in to_hide_indices for i in range(len(idea.messages))):
-        if show_questions_first:
-            st.markdown("**これまでの質問と回答**")
-
         # Properly pair questions and answers considering batch format
         # Filter out pending questions first
         filtered_messages = []
@@ -278,9 +275,16 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
                     questions.append(batch_questions[k])
                     answers.append(batch_answers[k])
 
-        # Display paired Q&A
-        for q, a in zip(questions, answers):
-            st.markdown(f"{q}: {a}")
+        # Display Q&A history in expander for version 2+
+        if show_questions_first and questions:
+            with st.expander("**これまでの質問と回答**", expanded=False):
+                # Display paired Q&A
+                for q, a in zip(questions, answers):
+                    st.markdown(f"{q}: {a}")
+        elif not show_questions_first and questions:
+            # Version 1: display inline
+            for q, a in zip(questions, answers):
+                st.markdown(f"{q}: {a}")
 
     # Pending assistant questions at tail -> per-question radios (はい/いいえ/わからない)
     if not show_questions_first and pending_questions:
@@ -339,18 +343,34 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             # Generate next questions only if not final
             if not idea.is_final and not error_msg:  # Don't generate questions if error
                 with st.spinner("次の質問を準備中…"):
-                    qs2, q_error = next_questions(
-                        manual_md,
-                        idea.messages,
-                        idea.draft_spec_markdown,
-                        num_questions=5,
-                        version=idea.draft_version,
-                        is_final=idea.is_final,
-                    )
-                    if q_error:
-                        st.warning(f"⚠️ 質問生成エラー: {q_error}")
+                    try:
+                        qs2, q_error = next_questions(
+                            manual_md,
+                            idea.messages,
+                            idea.draft_spec_markdown,
+                            num_questions=5,
+                            version=idea.draft_version,
+                            is_final=idea.is_final,
+                        )
+                        if q_error:
+                            st.warning(f"⚠️ 質問生成エラー: {q_error}")
+                            st.info("デフォルトの質問を使用します。")
+                    except Exception as e:
+                        print(f"ERROR: Exception in next_questions: {e}")
+                        st.warning(f"⚠️ 質問生成で予期しないエラーが発生しました: {str(e)[:100]}")
                         st.info("デフォルトの質問を使用します。")
+                        # Provide fallback questions
+                        qs2 = [
+                            "現行ドラフトに未記載箇所があります。図面は必要ですか？（はい/いいえ）",
+                            "実施例は複数のバリエーションがありますか？（はい/いいえ）",
+                            "発明の効果に定量的根拠はありますか？（はい/いいえ）",
+                            "既存技術との違いを明確に説明できますか？（はい/いいえ）",
+                            "この発明の最も重要な利点は何ですか？（はい/いいえで答えられる形で確認）",
+                        ][:5]
+                        q_error = "予期しないエラー"
+
                     print(f"DEBUG: Generated {len(qs2)} questions for version {idea.draft_version}")
+                    # Always add questions even if there was an error
                     for q in qs2:
                         append_assistant_message(idea.messages, q)
                         print(f"DEBUG: Added question: {q[:50]}...")
