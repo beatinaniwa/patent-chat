@@ -243,38 +243,73 @@ def regenerate_spec(
         return _fallback_skeleton(instruction_md, idea_description)
 
     # Format Q&A history for better understanding
-    qa_pairs = []
+    # Simple approach: collect all questions and answers in order
+    questions = []
+    answers = []
+
     i = 0
     while i < len(transcript):
-        if i < len(transcript) and transcript[i].get("role") == "assistant":
-            question = transcript[i]["content"]
-            answer = "未回答"
-            if i + 1 < len(transcript) and transcript[i + 1].get("role") == "user":
-                answer = transcript[i + 1]["content"]
-                i += 2
-            else:
-                i += 1
-            qa_pairs.append(f"Q: {question}\nA: {answer}")
-        else:
+        # Collect consecutive assistant messages (questions)
+        batch_questions = []
+        while i < len(transcript) and transcript[i].get("role") == "assistant":
+            batch_questions.append(transcript[i]["content"])
             i += 1
+
+        # Collect consecutive user messages (answers)
+        batch_answers = []
+        while i < len(transcript) and transcript[i].get("role") == "user":
+            batch_answers.append(transcript[i]["content"])
+            i += 1
+
+        # Add the batch of questions and answers
+        questions.extend(batch_questions)
+
+        # Pad answers to match questions if necessary
+        for j in range(len(batch_questions)):
+            if j < len(batch_answers):
+                answers.append(batch_answers[j])
+            else:
+                answers.append("未回答")
+
+    # Pair questions with answers
+    qa_pairs = []
+    for q, a in zip(questions, answers):
+        qa_pairs.append(f"Q: {q}\nA: {a}")
 
     qa_section = "\n\n".join(qa_pairs) if qa_pairs else "（質疑応答なし）"
 
+    # Log for debugging
+    logger.info(
+        "regenerate_spec: Q&A pairing - questions=%d, answers=%d, pairs=%d",
+        len(questions),
+        len(answers),
+        len(qa_pairs),
+    )
+
     system = (
-        "あなたは特許明細書の専門家です。与えられた指示書、アイデア概要、および質疑応答の内容を総合的に考慮し、"
-        "完全で一貫性のある特許明細書を作成してください。"
+        "あなたは特許明細書の執筆専門家です。与えられた指示書を参考にしつつ、"
+        "アイデア概要と質疑応答の内容から、完全な特許明細書を作成してください。"
     )
 
     prompt = (
-        f"[指示書]\n{instruction_md}\n\n"
-        f"[アイデア概要]\n{idea_description}\n\n"
-        f"[質疑応答による追加情報]\n{qa_section}\n\n"
-        "[作成要件]\n"
-        "- 上記の全ての情報を統合して、完全な特許明細書を作成\n"
-        "- 指示書の構成に従い、各セクションを体系的に記述\n"
-        "- アイデア概要を基礎とし、質疑応答で得られた情報を適切に反映\n"
-        "- 未確定箇所は '未記載' と明記\n"
-        "- Markdown形式で出力\n"
+        f"[作成の指針となる指示書]\n{instruction_md}\n\n"
+        f"[発明のアイデア概要]\n{idea_description}\n\n"
+        f"[ヒアリングによる追加情報]\n{qa_section}\n\n"
+        "[重要な作成要件]\n"
+        "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
+        "- アイデア概要と質疑応答の情報を統合して、実際の特許明細書を作成すること\n"
+        "- 以下のセクションを含む完全な特許明細書を出力：\n"
+        "  - 発明の名称\n"
+        "  - 技術分野\n"
+        "  - 背景技術\n"
+        "  - 発明が解決しようとする課題\n"
+        "  - 課題を解決するための手段\n"
+        "  - 発明の効果\n"
+        "  - 実施の形態\n"
+        "  - 請求項（案）\n"
+        "- 情報が不足している箇所は '未記載' または '（要確認）' と明記\n"
+        "- Markdown形式で、読みやすく構造化して出力\n"
+        "- 指示書のタイトルや本文をそのまま含めないこと\n"
     )
 
     try:

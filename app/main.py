@@ -240,20 +240,38 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
         if show_questions_first:
             st.markdown("**これまでの質問と回答**")
 
-        # Collect all questions and answers separately (excluding pending)
+        # Properly pair questions and answers considering batch format
+        # Filter out pending questions first
+        filtered_messages = []
+        for i, msg in enumerate(idea.messages):
+            if i not in to_hide_indices:
+                filtered_messages.append(msg)
+
+        # Collect questions and answers in batches
         questions = []
         answers = []
 
-        for i, msg in enumerate(idea.messages):
-            if i in to_hide_indices:
-                continue
+        j = 0
+        while j < len(filtered_messages):
+            # Collect consecutive assistant messages
+            batch_questions = []
+            while j < len(filtered_messages) and filtered_messages[j]["role"] == "assistant":
+                batch_questions.append(_clean_ai_message(filtered_messages[j]['content']))
+                j += 1
 
-            if msg["role"] == "assistant":
-                questions.append(_clean_ai_message(msg['content']))
-            elif msg["role"] == "user":
-                answers.append(msg['content'])
+            # Collect consecutive user messages
+            batch_answers = []
+            while j < len(filtered_messages) and filtered_messages[j]["role"] == "user":
+                batch_answers.append(filtered_messages[j]['content'])
+                j += 1
 
-        # Pair questions with answers and display them
+            # Pair this batch
+            for k in range(len(batch_questions)):
+                if k < len(batch_answers):
+                    questions.append(batch_questions[k])
+                    answers.append(batch_answers[k])
+
+        # Display paired Q&A
         for q, a in zip(questions, answers):
             st.markdown(f"{q}: {a}")
 
@@ -292,13 +310,19 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                 # Check if this should be the final version
                 if idea.draft_version >= 5:
                     idea.is_final = True
+                    print(f"DEBUG: Set is_final=True due to version={idea.draft_version} >= 5")
                 else:
                     # Check completeness for versions 2-4
                     is_complete, score = check_spec_completeness(
                         manual_md, idea.draft_spec_markdown, idea.draft_version
                     )
+                    print(
+                        f"DEBUG: Completeness check - is_complete={is_complete}, "
+                        f"score={score}, version={idea.draft_version}"
+                    )
                     if is_complete:
                         idea.is_final = True
+                        print(f"DEBUG: Set is_final=True due to completeness score={score}")
 
                 save_ideas(st.session_state.ideas)
 
@@ -313,9 +337,16 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                         version=idea.draft_version,
                         is_final=idea.is_final,
                     )
+                    print(f"DEBUG: Generated {len(qs2)} questions for version {idea.draft_version}")
                     for q in qs2:
                         append_assistant_message(idea.messages, q)
+                        print(f"DEBUG: Added question: {q[:50]}...")
                     save_ideas(st.session_state.ideas)
+            else:
+                print(
+                    f"DEBUG: Skipping question generation - "
+                    f"is_final={idea.is_final}, version={idea.draft_version}"
+                )
             st.rerun()
 
 
@@ -385,22 +416,36 @@ def hearing_ui(idea: Idea):
 
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
-            # Collect all questions and answers separately
+            # Properly pair questions and answers considering batch format
             questions = []
             answers = []
 
-            for msg in idea.messages:
-                if msg["role"] == "assistant":
-                    questions.append(_clean_ai_message(msg['content']))
-                elif msg["role"] == "user":
-                    answers.append(msg['content'])
+            j = 0
+            while j < len(idea.messages):
+                # Collect consecutive assistant messages
+                batch_questions = []
+                while j < len(idea.messages) and idea.messages[j]["role"] == "assistant":
+                    batch_questions.append(_clean_ai_message(idea.messages[j]['content']))
+                    j += 1
+
+                # Collect consecutive user messages
+                batch_answers = []
+                while j < len(idea.messages) and idea.messages[j]["role"] == "user":
+                    batch_answers.append(idea.messages[j]['content'])
+                    j += 1
+
+                # Pair this batch
+                for k in range(len(batch_questions)):
+                    if k < len(batch_answers):
+                        questions.append(batch_questions[k])
+                        answers.append(batch_answers[k])
+                    else:
+                        questions.append(batch_questions[k])
+                        answers.append("(未回答)")
 
             # Display Q&A pairs (question: answer on same line)
-            for i, q in enumerate(questions):
-                if i < len(answers):
-                    st.markdown(f"{q}: {answers[i]}")
-                else:
-                    st.markdown(f"{q}: (未回答)")
+            for q, a in zip(questions, answers):
+                st.markdown(f"{q}: {a}")
 
     # Non-final version display
     elif idea.draft_version == 1:
