@@ -1,7 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from typing import Dict, List, Optional
+
+
+@dataclass
+class Attachment:
+    filename: str
+    content_base64: str
+    comment: str
+    file_type: str
+    upload_time: datetime = field(default_factory=datetime.now)
 
 
 @dataclass
@@ -18,6 +28,8 @@ class Idea:
     draft_version: int = 1
     # Whether this specification is finalized
     is_final: bool = False
+    # Attached files
+    attachments: List[Attachment] = field(default_factory=list)
 
 
 @dataclass

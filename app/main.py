@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.export import export_docx, export_pdf
+from app.file_handler import process_uploaded_file
 from app.llm import (
     bootstrap_spec,
     check_spec_completeness,
@@ -23,7 +24,7 @@ from app.llm import (
     regenerate_spec,
 )
 from app.spec_builder import append_assistant_message, append_user_answer
-from app.state import AppState, Idea
+from app.state import AppState, Attachment, Idea
 from app.storage import delete_idea, get_idea, load_ideas, save_ideas
 
 APP_TITLE = "Patent Chat"
@@ -116,6 +117,26 @@ def new_idea_form():
     description = st.text_area(
         "アイデアの詳細説明", height=160, placeholder="アイデアの概要を記載…"
     )
+
+    # File upload section
+    st.markdown("### 関連ファイルの添付（任意）")
+    uploaded_files = st.file_uploader(
+        "ファイルを選択",
+        accept_multiple_files=True,
+        help="テキスト、PDF、画像ファイルをアップロードできます（各10MB以内）",
+    )
+
+    # Process uploaded files
+    attachments_to_add = []
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            comment = st.text_input(
+                f"{uploaded_file.name} へのコメント",
+                placeholder="このファイルの説明を入力...",
+                key=f"comment_{uploaded_file.name}",
+            )
+            attachments_to_add.append((uploaded_file, comment))
+
     cols = st.columns(2)
     if cols[0].button("保存", type="primary"):
         idea_id = str(uuid.uuid4())
@@ -123,19 +144,47 @@ def new_idea_form():
             status.update(label="タイトル生成中…", state="running")
             title = generate_title(description)
 
+            # Process attachments
+            status.update(label="添付ファイルを処理中…", state="running")
+            attachments = []
+            attachment_dicts = []
+            for uploaded_file, comment in attachments_to_add:
+                try:
+                    file_data = process_uploaded_file(uploaded_file, comment)
+                    attachment = Attachment(
+                        filename=file_data["filename"],
+                        content_base64=file_data["content_base64"],
+                        comment=file_data["comment"],
+                        file_type=file_data["file_type"],
+                        upload_time=file_data["upload_time"],
+                    )
+                    attachments.append(attachment)
+                    attachment_dicts.append(
+                        {
+                            "filename": file_data["filename"],
+                            "extracted_text": file_data["extracted_text"],
+                            "comment": file_data["comment"],
+                        }
+                    )
+                except Exception as e:
+                    st.warning(f"ファイル {uploaded_file.name} の処理に失敗しました: {str(e)}")
+
             status.update(label="アイデアを保存中…", state="running")
             idea = Idea(
                 id=idea_id,
                 title=title,
                 category=category,
                 description=description,
+                attachments=attachments,
             )
             st.session_state.ideas.append(idea)
             save_ideas(st.session_state.ideas)
 
             status.update(label="初期ドラフト生成中…", state="running")
             manual_md = _load_instruction_markdown()
-            spec_result, error_msg = bootstrap_spec(manual_md, idea.description)
+            spec_result, error_msg = bootstrap_spec(
+                manual_md, idea.description, attachments=attachment_dicts
+            )
             if error_msg:
                 st.error(f"⚠️ {error_msg}")
                 st.info("基本的な骨格を生成しました。後で再生成を試してください。")
@@ -150,6 +199,7 @@ def new_idea_form():
                 num_questions=5,
                 version=idea.draft_version,
                 is_final=idea.is_final,
+                attachments=attachment_dicts,
             )
             if q_error:
                 st.warning(f"⚠️ 質問生成エラー: {q_error}")
@@ -226,6 +276,28 @@ def _calculate_question_start_number(idea: Idea) -> int:
 
     # Start numbering from answered_count + 1
     return answered_count + 1
+
+
+def _prepare_attachment_dicts(idea: Idea) -> List[dict]:
+    """Convert Attachment objects to dictionaries for LLM functions."""
+    import base64
+
+    from app.file_handler import extract_text_from_file
+
+    attachment_dicts = []
+    for att in idea.attachments:
+        # Decode base64 to get file content
+        file_bytes = base64.b64decode(att.content_base64)
+        extracted_text = extract_text_from_file(file_bytes, att.filename)
+
+        attachment_dicts.append(
+            {
+                "filename": att.filename,
+                "extracted_text": extracted_text,
+                "comment": att.comment,
+            }
+        )
+    return attachment_dicts
 
 
 def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bool = False):
@@ -357,7 +429,10 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             for ans in selections:
                 append_user_answer(idea.messages, ans)
             with st.spinner("ドラフト更新中…"):
-                spec_result, error_msg = regenerate_spec(manual_md, idea.description, idea.messages)
+                attachment_dicts = _prepare_attachment_dicts(idea)
+                spec_result, error_msg = regenerate_spec(
+                    manual_md, idea.description, idea.messages, attachments=attachment_dicts
+                )
                 if error_msg:
                     st.error(f"⚠️ {error_msg}")
                     st.info("前のバージョンを保持します。")
@@ -388,6 +463,7 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             if not idea.is_final and not error_msg:  # Don't generate questions if error
                 with st.spinner("次の質問を準備中…"):
                     try:
+                        attachment_dicts = _prepare_attachment_dicts(idea)
                         qs2, q_error = next_questions(
                             manual_md,
                             idea.messages,
@@ -395,6 +471,7 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                             num_questions=5,
                             version=idea.draft_version,
                             is_final=idea.is_final,
+                            attachments=attachment_dicts,
                         )
                         if q_error:
                             st.warning(f"⚠️ 質問生成エラー: {q_error}")
@@ -430,10 +507,68 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
 def hearing_ui(idea: Idea):
     manual_md = _load_instruction_markdown()
 
+    # File upload section for hearing
+    with st.expander("追加ファイルをアップロード", expanded=False):
+        st.markdown("ヒアリング中に追加で参考資料をアップロードできます")
+        new_files = st.file_uploader(
+            "ファイルを選択",
+            accept_multiple_files=True,
+            help="テキスト、PDF、画像ファイルをアップロードできます（各10MB以内）",
+            key=f"hearing_upload_{idea.id}",
+        )
+
+        if new_files:
+            attachments_to_add = []
+            for uploaded_file in new_files:
+                comment = st.text_input(
+                    f"{uploaded_file.name} へのコメント",
+                    placeholder="このファイルの説明を入力...",
+                    key=f"hearing_comment_{idea.id}_{uploaded_file.name}",
+                )
+                attachments_to_add.append((uploaded_file, comment))
+
+            if st.button("ファイルを追加", key=f"add_files_{idea.id}"):
+                for uploaded_file, comment in attachments_to_add:
+                    try:
+                        file_data = process_uploaded_file(uploaded_file, comment)
+                        attachment = Attachment(
+                            filename=file_data["filename"],
+                            content_base64=file_data["content_base64"],
+                            comment=file_data["comment"],
+                            file_type=file_data["file_type"],
+                            upload_time=file_data["upload_time"],
+                        )
+                        idea.attachments.append(attachment)
+                        st.success(f"{uploaded_file.name} を追加しました")
+                    except Exception as e:
+                        st.error(f"ファイル {uploaded_file.name} の処理に失敗しました: {str(e)}")
+                save_ideas(st.session_state.ideas)
+                st.rerun()
+
+    # Display existing attachments
+    if idea.attachments:
+        with st.expander(f"添付ファイル ({len(idea.attachments)}件)", expanded=False):
+            for att in idea.attachments:
+                cols = st.columns([3, 1])
+                cols[0].markdown(f"📎 **{att.filename}** - {att.comment}")
+                import base64
+
+                file_bytes = base64.b64decode(att.content_base64)
+                cols[1].download_button(
+                    "ダウンロード",
+                    data=file_bytes,
+                    file_name=att.filename,
+                    mime=att.file_type,
+                    key=f"download_{idea.id}_{att.filename}",
+                )
+
     # Ensure draft exists
     if not idea.draft_spec_markdown:
         with st.spinner("初期ドラフト生成中…"):
-            spec_result, error_msg = bootstrap_spec(manual_md, idea.description)
+            attachment_dicts = _prepare_attachment_dicts(idea)
+            spec_result, error_msg = bootstrap_spec(
+                manual_md, idea.description, attachments=attachment_dicts
+            )
             if error_msg:
                 st.error(f"⚠️ {error_msg}")
                 st.info("基本的な骨格を生成しました。")
@@ -443,6 +578,7 @@ def hearing_ui(idea: Idea):
     # Auto-generate initial questions if none exist yet (up to 5)
     if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
+            attachment_dicts = _prepare_attachment_dicts(idea)
             qs, q_error = next_questions(
                 manual_md,
                 idea.messages,
@@ -450,6 +586,7 @@ def hearing_ui(idea: Idea):
                 num_questions=5,
                 version=idea.draft_version,
                 is_final=idea.is_final,
+                attachments=attachment_dicts,
             )
             if q_error:
                 st.warning(f"⚠️ 質問生成エラー: {q_error}")

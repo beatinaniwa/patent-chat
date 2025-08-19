@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
 
+from app.file_handler import _format_attachments_for_prompt
+
 DEFAULT_MODEL_NAME = "gemini-2.5-pro"
 
 # Logger (to terminal)
@@ -95,7 +97,9 @@ def generate_title(idea_description: str) -> str:
         return (idea_description.strip().splitlines()[0] or "新規アイデア")[:30]
 
 
-def bootstrap_spec(sample_manual_md: str, idea_description: str) -> Tuple[str, Optional[str]]:
+def bootstrap_spec(
+    sample_manual_md: str, idea_description: str, attachments: Optional[List[Dict]] = None
+) -> Tuple[str, Optional[str]]:
     client = _get_client()
     if client is None:
         error_msg = "APIクライアントの初期化に失敗しました。APIキーの設定を確認してください"
@@ -105,8 +109,22 @@ def bootstrap_spec(sample_manual_md: str, idea_description: str) -> Tuple[str, O
         "あなたは特許明細書の下書きを作る専門家です。与えられた指示書（プロンプト）を最優先で参照し、"
         "不足部分は'未記載'と明示しつつ、Markdownで初稿を作ってください。"
     )
+
+    # Format attachments if provided
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+
     prompt = (
         f"[指示書]\n{sample_manual_md}\n\n"
+        f"[アイデア概要]\n{idea_description}\n"
+        f"{attachments_section}\n"
+        "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
+        "- 添付ファイルの情報を適切に反映させる\n"
+        if attachments
+        else f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n\n"
         "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
     )
@@ -142,6 +160,7 @@ def next_questions(
     num_questions: int = 3,
     version: int = 1,
     is_final: bool = False,
+    attachments: Optional[List[Dict]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     # Don't generate questions if already finalized or at version 5
     if is_final or version >= 5:
@@ -162,8 +181,28 @@ def next_questions(
         "現行ドラフトの不足・曖昧・未記載部分を見つけ、ユーザーが答えやすい"
         "『はい/いいえ』のクローズド質問を優先度順に作成してください。"
     )
+
+    # Format attachments if provided
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル]\n{formatted_attachments}\n"
+
     prompt = (
         f"[指示書]\n{instruction_md}\n\n"
+        f"[現行ドラフト(Markdown)]\n{current_spec_md}\n\n"
+        f"[これまでの対話]\n{transcript_str}\n"
+        f"{attachments_section}\n"
+        "[出力要件]\n"
+        "- 質問のみを出力（前置きや挨拶は不要）\n"
+        "- 各行1問、{num}問\n"
+        "- はい/いいえ で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
+        "- 1つの質問につき1論点、具体的に\n"
+        "- 既に回答済みの重複質問は避ける\n"
+        "- 添付ファイルの内容も考慮する\n".replace("{num}", str(num_questions))
+        if attachments
+        else f"[指示書]\n{instruction_md}\n\n"
         f"[現行ドラフト(Markdown)]\n{current_spec_md}\n\n"
         f"[これまでの対話]\n{transcript_str}\n\n"
         "[出力要件]\n"
@@ -247,6 +286,7 @@ def regenerate_spec(
     instruction_md: str,
     idea_description: str,
     transcript: List[Dict[str, str]],
+    attachments: Optional[List[Dict]] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Regenerate the entire specification from scratch using all available information.
@@ -315,6 +355,13 @@ def regenerate_spec(
         len(qa_pairs),
     )
 
+    # Format attachments if provided
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+
     system = (
         "あなたは特許明細書の執筆専門家です。与えられた指示書を参考にしつつ、"
         "アイデア概要と質疑応答の内容から、完全な特許明細書を作成してください。"
@@ -323,11 +370,14 @@ def regenerate_spec(
     prompt = (
         f"[作成の指針となる指示書]\n{instruction_md}\n\n"
         f"[発明のアイデア概要]\n{idea_description}\n\n"
-        f"[ヒアリングによる追加情報]\n{qa_section}\n\n"
+        f"[ヒアリングによる追加情報]\n{qa_section}\n"
+        f"{attachments_section}\n"
         "[重要な作成要件]\n"
         "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
         "- アイデア概要と質疑応答の情報を統合して、実際の特許明細書を作成すること\n"
-        "- 以下のセクションを含む完全な特許明細書を出力：\n"
+        "- 添付ファイルの情報も適切に反映させること\n"
+        if attachments
+        else "" + "- 以下のセクションを含む完全な特許明細書を出力：\n"
         "  - 発明の名称\n"
         "  - 技術分野\n"
         "  - 背景技術\n"
