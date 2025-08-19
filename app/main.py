@@ -4,7 +4,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -15,7 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.export import export_docx, export_pdf
-from app.file_handler import process_uploaded_file
+from app.file_handler import process_uploaded_file_with_gemini
 from app.llm import (
     bootstrap_spec,
     check_spec_completeness,
@@ -148,15 +148,32 @@ def new_idea_form():
             status.update(label="添付ファイルを処理中…", state="running")
             attachments = []
             attachment_dicts = []
+            gemini_files = []
+
+            # Get Gemini client if available
+            import os
+
+            from google import genai
+
+            api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            gemini_client = None
+            if api_key:
+                try:
+                    gemini_client = genai.Client(api_key=api_key)
+                except Exception:
+                    pass
+
             for uploaded_file, comment in attachments_to_add:
                 try:
-                    file_data = process_uploaded_file(uploaded_file, comment)
+                    file_data = process_uploaded_file_with_gemini(uploaded_file, comment)
                     attachment = Attachment(
                         filename=file_data["filename"],
                         content_base64=file_data["content_base64"],
                         comment=file_data["comment"],
                         file_type=file_data["file_type"],
                         upload_time=file_data["upload_time"],
+                        gemini_file_id=file_data.get("gemini_file_id"),
+                        gemini_mime_type=file_data.get("gemini_mime_type"),
                     )
                     attachments.append(attachment)
                     attachment_dicts.append(
@@ -166,6 +183,15 @@ def new_idea_form():
                             "comment": file_data["comment"],
                         }
                     )
+
+                    # Add Gemini file object if available
+                    if file_data.get("gemini_file_id") and gemini_client:
+                        try:
+                            gemini_file = gemini_client.files.get(id=file_data["gemini_file_id"])
+                            gemini_files.append(gemini_file)
+                        except Exception:
+                            pass
+
                 except Exception as e:
                     st.warning(f"ファイル {uploaded_file.name} の処理に失敗しました: {str(e)}")
 
@@ -183,7 +209,7 @@ def new_idea_form():
             status.update(label="初期ドラフト生成中…", state="running")
             manual_md = _load_instruction_markdown()
             spec_result, error_msg = bootstrap_spec(
-                manual_md, idea.description, attachments=attachment_dicts
+                manual_md, idea.description, attachments=attachment_dicts, gemini_files=gemini_files
             )
             if error_msg:
                 st.error(f"⚠️ {error_msg}")
@@ -278,26 +304,70 @@ def _calculate_question_start_number(idea: Idea) -> int:
     return answered_count + 1
 
 
-def _prepare_attachment_dicts(idea: Idea) -> List[dict]:
-    """Convert Attachment objects to dictionaries for LLM functions."""
+def _prepare_attachment_dicts(idea: Idea) -> Tuple[List[dict], List]:
+    """Convert Attachment objects to dictionaries for LLM functions.
+
+    Returns:
+        Tuple of (attachment_dicts, gemini_files)
+    """
     import base64
+    import os
+
+    from google import genai
 
     from app.file_handler import extract_text_from_file
 
     attachment_dicts = []
-    for att in idea.attachments:
-        # Decode base64 to get file content
-        file_bytes = base64.b64decode(att.content_base64)
-        extracted_text = extract_text_from_file(file_bytes, att.filename)
+    gemini_files = []
 
-        attachment_dicts.append(
-            {
-                "filename": att.filename,
-                "extracted_text": extracted_text,
-                "comment": att.comment,
-            }
-        )
-    return attachment_dicts
+    # Get Gemini client if available
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    client = None
+    if api_key:
+        try:
+            client = genai.Client(api_key=api_key)
+        except Exception:
+            pass
+
+    for att in idea.attachments:
+        # Check if we have a Gemini file ID
+        if att.gemini_file_id and client:
+            try:
+                # Get the Gemini file object
+                gemini_file = client.files.get(id=att.gemini_file_id)
+                gemini_files.append(gemini_file)
+                # Still add to dicts for backward compatibility
+                attachment_dicts.append(
+                    {
+                        "filename": att.filename,
+                        "extracted_text": "",  # Will be processed by Gemini directly
+                        "comment": att.comment,
+                    }
+                )
+            except Exception:
+                # Fall back to local extraction
+                file_bytes = base64.b64decode(att.content_base64)
+                extracted_text = extract_text_from_file(file_bytes, att.filename)
+                attachment_dicts.append(
+                    {
+                        "filename": att.filename,
+                        "extracted_text": extracted_text,
+                        "comment": att.comment,
+                    }
+                )
+        else:
+            # No Gemini file ID, use local extraction
+            file_bytes = base64.b64decode(att.content_base64)
+            extracted_text = extract_text_from_file(file_bytes, att.filename)
+            attachment_dicts.append(
+                {
+                    "filename": att.filename,
+                    "extracted_text": extracted_text,
+                    "comment": att.comment,
+                }
+            )
+
+    return attachment_dicts, gemini_files
 
 
 def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bool = False):
@@ -429,9 +499,13 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             for ans in selections:
                 append_user_answer(idea.messages, ans)
             with st.spinner("ドラフト更新中…"):
-                attachment_dicts = _prepare_attachment_dicts(idea)
+                attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
                 spec_result, error_msg = regenerate_spec(
-                    manual_md, idea.description, idea.messages, attachments=attachment_dicts
+                    manual_md,
+                    idea.description,
+                    idea.messages,
+                    attachments=attachment_dicts,
+                    gemini_files=gemini_files,
                 )
                 if error_msg:
                     st.error(f"⚠️ {error_msg}")
@@ -463,7 +537,7 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
             if not idea.is_final and not error_msg:  # Don't generate questions if error
                 with st.spinner("次の質問を準備中…"):
                     try:
-                        attachment_dicts = _prepare_attachment_dicts(idea)
+                        attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
                         qs2, q_error = next_questions(
                             manual_md,
                             idea.messages,
@@ -530,7 +604,7 @@ def hearing_ui(idea: Idea):
             if st.button("ファイルを追加", key=f"add_files_{idea.id}"):
                 for uploaded_file, comment in attachments_to_add:
                     try:
-                        file_data = process_uploaded_file(uploaded_file, comment)
+                        file_data = process_uploaded_file_with_gemini(uploaded_file, comment)
                         attachment = Attachment(
                             filename=file_data["filename"],
                             content_base64=file_data["content_base64"],
@@ -565,9 +639,9 @@ def hearing_ui(idea: Idea):
     # Ensure draft exists
     if not idea.draft_spec_markdown:
         with st.spinner("初期ドラフト生成中…"):
-            attachment_dicts = _prepare_attachment_dicts(idea)
+            attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
             spec_result, error_msg = bootstrap_spec(
-                manual_md, idea.description, attachments=attachment_dicts
+                manual_md, idea.description, attachments=attachment_dicts, gemini_files=gemini_files
             )
             if error_msg:
                 st.error(f"⚠️ {error_msg}")
@@ -578,7 +652,7 @@ def hearing_ui(idea: Idea):
     # Auto-generate initial questions if none exist yet (up to 5)
     if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
-            attachment_dicts = _prepare_attachment_dicts(idea)
+            attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
             qs, q_error = next_questions(
                 manual_md,
                 idea.messages,

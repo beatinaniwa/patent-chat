@@ -12,6 +12,8 @@ class Attachment:
     comment: str
     file_type: str
     upload_time: datetime = field(default_factory=datetime.now)
+    gemini_file_id: Optional[str] = None
+    gemini_mime_type: Optional[str] = None
 
 
 @dataclass

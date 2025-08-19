@@ -98,7 +98,10 @@ def generate_title(idea_description: str) -> str:
 
 
 def bootstrap_spec(
-    sample_manual_md: str, idea_description: str, attachments: Optional[List[Dict]] = None
+    sample_manual_md: str,
+    idea_description: str,
+    attachments: Optional[List[Dict]] = None,
+    gemini_files: Optional[List] = None,
 ) -> Tuple[str, Optional[str]]:
     client = _get_client()
     if client is None:
@@ -131,15 +134,31 @@ def bootstrap_spec(
     try:
         model_name = _model_name()
         logger.info(
-            "bootstrap_spec: calling model=%s, instruction_len=%d, idea_len=%d",
+            "bootstrap_spec: calling model=%s, instruction_len=%d, idea_len=%d, gemini_files=%d",
             model_name,
             len(sample_manual_md or ""),
             len(idea_description or ""),
+            len(gemini_files or []),
         )
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=f"{system}\n\n{prompt}",
-        )
+
+        # Build contents array with Gemini files if available
+        if gemini_files:
+            contents = []
+            # Add Gemini file objects first
+            for file_obj in gemini_files:
+                contents.append(file_obj)
+            # Then add the text prompt
+            contents.append(f"{system}\n\n{prompt}")
+
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+            )
+        else:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=f"{system}\n\n{prompt}",
+            )
         _log_response_debug("bootstrap_spec", resp)
         text = (resp.text or "").strip()
         if not text:
@@ -287,6 +306,7 @@ def regenerate_spec(
     idea_description: str,
     transcript: List[Dict[str, str]],
     attachments: Optional[List[Dict]] = None,
+    gemini_files: Optional[List] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Regenerate the entire specification from scratch using all available information.
@@ -394,16 +414,35 @@ def regenerate_spec(
     try:
         model_name = _model_name()
         logger.info(
-            "regenerate_spec: calling model=%s, instruction_len=%d, idea_len=%d, qa_pairs=%d",
+            (
+                "regenerate_spec: calling model=%s, instruction_len=%d, "
+                "idea_len=%d, qa_pairs=%d, gemini_files=%d"
+            ),
             model_name,
             len(instruction_md or ""),
             len(idea_description or ""),
             len(qa_pairs),
+            len(gemini_files or []),
         )
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=f"{system}\n\n{prompt}",
-        )
+
+        # Build contents array with Gemini files if available
+        if gemini_files:
+            contents = []
+            # Add Gemini file objects first
+            for file_obj in gemini_files:
+                contents.append(file_obj)
+            # Then add the text prompt
+            contents.append(f"{system}\n\n{prompt}")
+
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+            )
+        else:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=f"{system}\n\n{prompt}",
+            )
         _log_response_debug("regenerate_spec", resp)
         text = (resp.text or "").strip()
         if not text:
