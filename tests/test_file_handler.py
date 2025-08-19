@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from app.file_handler import (
     MAX_FILE_SIZE,
     extract_text_from_file,
-    process_uploaded_file,
+    process_uploaded_file_with_gemini,
     validate_file_size,
     validate_file_type,
 )
@@ -158,7 +158,8 @@ class TestFileProcessing:
         file_mock.read.return_value = content.encode("utf-8")
         file_mock.size = len(content)
 
-        result = process_uploaded_file(file_mock, "This is a test file")
+        # Text files should not use Gemini, so no additional mocking needed
+        result = process_uploaded_file_with_gemini(file_mock, "This is a test file")
 
         assert result["filename"] == "test.txt"
         assert result["file_type"] == "text/plain"
@@ -166,6 +167,7 @@ class TestFileProcessing:
         assert base64.b64decode(result["content_base64"]).decode("utf-8") == content
         assert result["extracted_text"] == content
         assert "upload_time" in result
+        assert result["gemini_file_id"] is None  # Text files don't use Gemini
 
     @patch("app.file_handler.validate_file_size")
     @patch("app.file_handler.validate_file_type")
@@ -186,7 +188,8 @@ class TestFileProcessing:
         file_mock.read.return_value = pdf_content
         file_mock.size = len(pdf_content)
 
-        result = process_uploaded_file(file_mock, "Technical specification")
+        # Mock Gemini upload for PDF (which will fail, triggering fallback)
+        result = process_uploaded_file_with_gemini(file_mock, "Technical specification")
 
         assert result["filename"] == "document.pdf"
         assert result["file_type"] == "application/pdf"
@@ -213,7 +216,8 @@ class TestFileProcessing:
         file_mock.read.return_value = image_content
         file_mock.size = len(image_content)
 
-        result = process_uploaded_file(file_mock, "System architecture")
+        # Mock Gemini upload for image (which will fail, triggering fallback)
+        result = process_uploaded_file_with_gemini(file_mock, "System architecture")
 
         assert result["filename"] == "diagram.png"
         assert result["file_type"] == "image/png"
@@ -231,7 +235,7 @@ class TestFileProcessing:
         file_mock.size = 15 * 1024 * 1024
 
         with pytest.raises(ValueError, match="ファイルサイズが10MBを超えています"):
-            process_uploaded_file(file_mock, "Large file")
+            process_uploaded_file_with_gemini(file_mock, "Large file")
 
     @patch("app.file_handler.validate_file_size")
     @patch("app.file_handler.validate_file_type")
@@ -245,7 +249,7 @@ class TestFileProcessing:
         file_mock.type = "application/x-msdownload"
 
         with pytest.raises(ValueError, match="サポートされていないファイル形式"):
-            process_uploaded_file(file_mock, "Executable file")
+            process_uploaded_file_with_gemini(file_mock, "Executable file")
 
     @patch("app.file_handler.validate_file_size")
     @patch("app.file_handler.validate_file_type")
@@ -262,7 +266,7 @@ class TestFileProcessing:
         file_mock.read.return_value = b"\x82\xa0\x82\xa2\x82\xa4"
         file_mock.size = 6
 
-        result = process_uploaded_file(file_mock, "Japanese text file")
+        result = process_uploaded_file_with_gemini(file_mock, "Japanese text file")
 
         # Should handle encoding gracefully
         assert result["filename"] == "test.txt"

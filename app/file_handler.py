@@ -281,42 +281,6 @@ def extract_text_from_image(image_bytes: bytes) -> str:
         return "画像の読み取りに失敗しました"
 
 
-def process_uploaded_file(file, comment: str) -> Dict[str, Any]:
-    """Process an uploaded file and prepare it for storage.
-
-    Args:
-        file: Streamlit UploadedFile object
-        comment: User's comment about the file
-
-    Returns:
-        Dictionary with file information ready for storage
-
-    Raises:
-        ValueError: If file validation fails
-    """
-    # Validate file
-    validate_file_size(file)
-    validate_file_type(file.name)
-
-    # Read file content
-    file_bytes = file.read()
-
-    # Extract text content
-    extracted_text = extract_text_from_file(file_bytes, file.name)
-
-    # Encode to base64 for storage
-    content_base64 = base64.b64encode(file_bytes).decode("utf-8")
-
-    return {
-        "filename": file.name,
-        "content_base64": content_base64,
-        "comment": comment,
-        "file_type": file.type,
-        "extracted_text": extracted_text,
-        "upload_time": datetime.now(),
-    }
-
-
 def _format_attachments_for_prompt(attachments: Optional[list]) -> str:
     """Format attachments for LLM prompt.
 
