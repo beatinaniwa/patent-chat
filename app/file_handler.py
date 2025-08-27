@@ -7,8 +7,10 @@ import os
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
+from docx import Document
 from google import genai
 from PIL import Image
+from pptx import Presentation
 from pypdf import PdfReader
 
 # Logger
@@ -40,6 +42,7 @@ SUPPORTED_TEXT_EXTENSIONS = {
 }
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp"}
 SUPPORTED_PDF_EXTENSIONS = {".pdf"}
+SUPPORTED_OFFICE_EXTENSIONS = {".docx", ".pptx"}
 MAX_TEXT_LENGTH = 4000  # Maximum characters to extract from a file
 
 
@@ -80,15 +83,23 @@ def upload_to_gemini(file_bytes: bytes, filename: str, mime_type: str) -> Tuple[
 
     try:
         logger.info(f"Uploading {filename} to Gemini Files API")
-        uploaded_file = client.files.upload(file=file_bytes, config=dict(mime_type=mime_type))
-        logger.info(f"Successfully uploaded {filename} with ID: {uploaded_file.id}")
-        return uploaded_file.id, mime_type
+        # Create a file-like object from bytes
+        file_obj = io.BytesIO(file_bytes)
+        file_obj.name = filename  # Set the filename attribute
+        uploaded_file = client.files.upload(file=file_obj, config=dict(mime_type=mime_type))
+        logger.info(f"Successfully uploaded {filename} with name: {uploaded_file.name}")
+        return uploaded_file.name, mime_type
     except Exception as e:
-        logger.error(f"Failed to upload {filename} to Gemini: {e}")
+        # Avoid logging file content - only log the exception message
+        error_msg = str(e)
+        # Truncate error message if it's too long (might contain file data)
+        if len(error_msg) > 500:
+            error_msg = error_msg[:500] + "... (truncated)"
+        logger.error(f"Failed to upload {filename} to Gemini: {error_msg}")
         return None, mime_type
 
 
-def extract_with_gemini(file_obj, prompt: str = None) -> str:
+def extract_with_gemini(file_obj, prompt: Optional[str] = None) -> str:
     """Extract content from file using Gemini.
 
     Args:
@@ -113,7 +124,7 @@ def extract_with_gemini(file_obj, prompt: str = None) -> str:
     try:
         logger.info("Extracting content with Gemini")
         response = client.models.generate_content(
-            model="gemini-2.0-flash-exp", contents=[file_obj, prompt]
+            model="gemini-2.5-flash", contents=[file_obj, prompt]
         )
         extracted_text = response.text or ""
         logger.info(f"Extracted {len(extracted_text)} characters")
@@ -159,7 +170,10 @@ def validate_file_type(filename: str) -> bool:
         raise ValueError("ファイル拡張子が不明です")
 
     all_supported = (
-        SUPPORTED_TEXT_EXTENSIONS | SUPPORTED_IMAGE_EXTENSIONS | SUPPORTED_PDF_EXTENSIONS
+        SUPPORTED_TEXT_EXTENSIONS
+        | SUPPORTED_IMAGE_EXTENSIONS
+        | SUPPORTED_PDF_EXTENSIONS
+        | SUPPORTED_OFFICE_EXTENSIONS
     )
     if ext not in all_supported:
         raise ValueError(f"サポートされていないファイル形式です: {ext}")
@@ -206,6 +220,12 @@ def extract_text_from_file(file_bytes: bytes, filename: str) -> str:
     elif ext in SUPPORTED_IMAGE_EXTENSIONS:
         return extract_text_from_image(file_bytes)
 
+    # Office documents
+    elif ext == ".docx":
+        return extract_text_from_docx(file_bytes)
+    elif ext == ".pptx":
+        return extract_text_from_pptx(file_bytes)
+
     # Unsupported
     else:
         return ""
@@ -232,7 +252,7 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
 
             page_text = page.extract_text()
             if page_text:
-                text_parts.append(f"[Page {i+1}]\n{page_text}")
+                text_parts.append(f"[Page {i + 1}]\n{page_text}")
 
         if not text_parts:
             return "PDFからテキストを抽出できませんでした"
@@ -279,6 +299,93 @@ def extract_text_from_image(image_bytes: bytes) -> str:
     except Exception as e:
         logger.error(f"Image extraction error: {e}")
         return "画像の読み取りに失敗しました"
+
+
+def extract_text_from_docx(docx_bytes: bytes) -> str:
+    """Extract text from Word document bytes.
+
+    Args:
+        docx_bytes: Word document file content
+
+    Returns:
+        Extracted text from Word document
+    """
+    try:
+        docx_file = io.BytesIO(docx_bytes)
+        doc = Document(docx_file)
+
+        text_parts = []
+
+        # Extract text from paragraphs
+        for paragraph in doc.paragraphs:
+            if paragraph.text.strip():
+                text_parts.append(paragraph.text)
+
+        # Extract text from tables
+        for table in doc.tables:
+            for row in table.rows:
+                row_text = []
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+                    if cell_text and cell_text not in row_text:  # Avoid duplicates
+                        row_text.append(cell_text)
+                if row_text:
+                    text_parts.append(" | ".join(row_text))
+
+        # Join all text parts
+        full_text = "\n".join(text_parts)
+        if len(full_text) > MAX_TEXT_LENGTH:
+            return full_text[:MAX_TEXT_LENGTH] + "\n... (以下省略)"
+        return full_text if full_text else "Word文書にテキストが見つかりませんでした"
+
+    except Exception as e:
+        logger.error(f"DOCX extraction error: {e}")
+        return "Word文書の読み取りに失敗しました"
+
+
+def extract_text_from_pptx(pptx_bytes: bytes) -> str:
+    """Extract text from PowerPoint presentation bytes.
+
+    Args:
+        pptx_bytes: PowerPoint file content
+
+    Returns:
+        Extracted text from PowerPoint presentation
+    """
+    try:
+        pptx_file = io.BytesIO(pptx_bytes)
+        prs = Presentation(pptx_file)
+
+        text_parts = []
+
+        for slide_num, slide in enumerate(prs.slides, start=1):
+            slide_texts = []
+
+            # Extract text from shapes
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    slide_texts.append(shape.text.strip())
+
+            # Extract text from notes
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+                notes_text = slide.notes_slide.notes_text_frame.text
+                if notes_text.strip():
+                    slide_texts.append(f"[ノート]: {notes_text.strip()}")
+
+            # Add slide content if any text was found
+            if slide_texts:
+                slide_content = f"[スライド {slide_num}]\n" + "\n".join(slide_texts)
+                text_parts.append(slide_content)
+
+        # Join all slide texts
+        full_text = "\n\n".join(text_parts)
+        if len(full_text) > MAX_TEXT_LENGTH:
+            return full_text[:MAX_TEXT_LENGTH] + "\n... (以下省略)"
+        return full_text if full_text else "PowerPoint文書にテキストが見つかりませんでした"
+
+    except Exception as e:
+        logger.error(f"PPTX extraction error: {e}")
+        return "PowerPoint文書の読み取りに失敗しました"
 
 
 def _format_attachments_for_prompt(attachments: Optional[list]) -> str:
@@ -360,7 +467,7 @@ def process_uploaded_file_with_gemini(file, comment: str) -> Dict[str, Any]:
                 client = _get_client()
                 if client:
                     try:
-                        gemini_file = client.files.get(id=gemini_file_id)
+                        gemini_file = client.files.get(name=gemini_file_id)
                         # Extract content with Gemini
                         extracted_text = extract_with_gemini(gemini_file)
                     except Exception as e:

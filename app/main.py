@@ -123,7 +123,7 @@ def new_idea_form():
     uploaded_files = st.file_uploader(
         "ファイルを選択",
         accept_multiple_files=True,
-        help="テキスト、PDF、画像ファイルをアップロードできます（各10MB以内）",
+        help="テキスト、PDF、画像、Word、PowerPointファイルをアップロードできます（各10MB以内）",
     )
 
     # Process uploaded files
@@ -150,11 +150,13 @@ def new_idea_form():
             attachment_dicts = []
             gemini_files = []
 
-            # Get Gemini client if available
+            # Get Gemini client to fetch file objects
+            import logging
             import os
 
             from google import genai
 
+            logger = logging.getLogger("patent_chat.main")
             api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
             gemini_client = None
             if api_key:
@@ -187,10 +189,15 @@ def new_idea_form():
                     # Add Gemini file object if available
                     if file_data.get("gemini_file_id") and gemini_client:
                         try:
-                            gemini_file = gemini_client.files.get(id=file_data["gemini_file_id"])
+                            # Get the actual file object from Gemini
+                            gemini_file = gemini_client.files.get(name=file_data["gemini_file_id"])
                             gemini_files.append(gemini_file)
                         except Exception:
-                            pass
+                            file_id = file_data['gemini_file_id']
+                            logger.warning(f"Failed to get Gemini file object for {file_id}")
+                    elif file_data.get("gemini_file_id"):
+                        # No client available, just store the ID
+                        gemini_files.append(file_data["gemini_file_id"])
 
                 except Exception as e:
                     st.warning(f"ファイル {uploaded_file.name} の処理に失敗しました: {str(e)}")
@@ -311,50 +318,47 @@ def _prepare_attachment_dicts(idea: Idea) -> Tuple[List[dict], List]:
         Tuple of (attachment_dicts, gemini_files)
     """
     import base64
-    import os
-
-    from google import genai
 
     from app.file_handler import extract_text_from_file
 
     attachment_dicts = []
     gemini_files = []
 
-    # Get Gemini client if available
+    # Get Gemini client to fetch file objects
+    import logging
+    import os
+
+    from google import genai
+
+    logger = logging.getLogger("patent_chat.main")
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-    client = None
+    gemini_client = None
     if api_key:
         try:
-            client = genai.Client(api_key=api_key)
+            gemini_client = genai.Client(api_key=api_key)
         except Exception:
             pass
 
     for att in idea.attachments:
         # Check if we have a Gemini file ID
-        if att.gemini_file_id and client:
+        if att.gemini_file_id and gemini_client:
             try:
-                # Get the Gemini file object
-                gemini_file = client.files.get(id=att.gemini_file_id)
+                # Get the actual file object from Gemini
+                gemini_file = gemini_client.files.get(name=att.gemini_file_id)
                 gemini_files.append(gemini_file)
-                # Still add to dicts for backward compatibility
-                attachment_dicts.append(
-                    {
-                        "filename": att.filename,
-                        "extracted_text": "",  # Will be processed by Gemini directly
-                        "comment": att.comment,
-                    }
-                )
             except Exception:
-                # Fall back to local extraction
-                file_bytes = base64.b64decode(att.content_base64)
-                extracted_text = extract_text_from_file(file_bytes, att.filename)
-                attachment_dicts.append(
-                    {
-                        "filename": att.filename,
-                        "extracted_text": extracted_text,
-                        "comment": att.comment,
-                    }
-                )
+                logger.warning(f"Failed to get Gemini file object for {att.gemini_file_id}")
+        elif att.gemini_file_id:
+            # No client available, just store the ID
+            gemini_files.append(att.gemini_file_id)
+            # Still add to dicts for backward compatibility
+            attachment_dicts.append(
+                {
+                    "filename": att.filename,
+                    "extracted_text": "",  # Will be processed by Gemini directly
+                    "comment": att.comment,
+                }
+            )
         else:
             # No Gemini file ID, use local extraction
             file_bytes = base64.b64decode(att.content_base64)
@@ -587,7 +591,7 @@ def hearing_ui(idea: Idea):
         new_files = st.file_uploader(
             "ファイルを選択",
             accept_multiple_files=True,
-            help="テキスト、PDF、画像ファイルをアップロードできます（各10MB以内）",
+            help="テキスト、PDF、画像、Word、PowerPointファイルをアップロードできます（各10MB以内）",
             key=f"hearing_upload_{idea.id}",
         )
 

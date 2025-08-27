@@ -29,7 +29,13 @@ def _classify_api_error(e: Exception) -> str:
     """エラーを分類してユーザーフレンドリーなメッセージを返す"""
     error_str = str(e).lower()
 
-    if "api_key" in error_str or "api key" in error_str or "unauthorized" in error_str:
+    # Check for 500 internal errors first
+    if "500" in error_str or "internal" in error_str or "servererror" in error_str:
+        return (
+            "Geminiサーバーで一時的な問題が発生しています。"
+            "数秒後に再試行してください。問題が続く場合は時間をおいてお試しください"
+        )
+    elif "api_key" in error_str or "api key" in error_str or "unauthorized" in error_str:
         return (
             "APIキーの設定を確認してください。"
             ".envファイルにGOOGLE_API_KEYまたはGEMINI_API_KEYを設定してください"
@@ -143,11 +149,23 @@ def bootstrap_spec(
 
         # Build contents array with Gemini files if available
         if gemini_files:
+            # Create contents array - files first, then text prompt
+            # gemini_files should be file objects or file IDs
             contents = []
-            # Add Gemini file objects first
-            for file_obj in gemini_files:
-                contents.append(file_obj)
-            # Then add the text prompt
+
+            # Add files first
+            for file_info in gemini_files:
+                if isinstance(file_info, str):
+                    # It's a file ID/URI, add directly
+                    contents.append(file_info)
+                elif hasattr(file_info, 'name'):
+                    # It's a file object, use it directly
+                    contents.append(file_info)
+                else:
+                    # Unsupported format, skip
+                    logger.warning(f"Unsupported file format: {type(file_info)}")
+
+            # Add the text prompt after files
             contents.append(f"{system}\n\n{prompt}")
 
             resp = client.models.generate_content(
@@ -391,13 +409,19 @@ def regenerate_spec(
         f"[作成の指針となる指示書]\n{instruction_md}\n\n"
         f"[発明のアイデア概要]\n{idea_description}\n\n"
         f"[ヒアリングによる追加情報]\n{qa_section}\n"
-        f"{attachments_section}\n"
+        f"{attachments_section}"
         "[重要な作成要件]\n"
         "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
         "- アイデア概要と質疑応答の情報を統合して、実際の特許明細書を作成すること\n"
-        "- 添付ファイルの情報も適切に反映させること\n"
-        if attachments
-        else "" + "- 以下のセクションを含む完全な特許明細書を出力：\n"
+    )
+
+    # Add attachment-specific requirement if attachments exist
+    if attachments:
+        prompt += "- 添付ファイルの情報も適切に反映させること\n"
+
+    # Add common requirements
+    prompt += (
+        "- 以下のセクションを含む完全な特許明細書を出力：\n"
         "  - 発明の名称\n"
         "  - 技術分野\n"
         "  - 背景技術\n"
@@ -427,11 +451,23 @@ def regenerate_spec(
 
         # Build contents array with Gemini files if available
         if gemini_files:
+            # Create contents array - files first, then text prompt
+            # gemini_files should be file objects or file IDs
             contents = []
-            # Add Gemini file objects first
-            for file_obj in gemini_files:
-                contents.append(file_obj)
-            # Then add the text prompt
+
+            # Add files first
+            for file_info in gemini_files:
+                if isinstance(file_info, str):
+                    # It's a file ID/URI, add directly
+                    contents.append(file_info)
+                elif hasattr(file_info, 'name'):
+                    # It's a file object, use it directly
+                    contents.append(file_info)
+                else:
+                    # Unsupported format, skip
+                    logger.warning(f"Unsupported file format: {type(file_info)}")
+
+            # Add the text prompt after files
             contents.append(f"{system}\n\n{prompt}")
 
             resp = client.models.generate_content(
