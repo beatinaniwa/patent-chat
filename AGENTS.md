@@ -24,7 +24,9 @@
    - 本文はMarkdownで構造化し、見出し・箇条書きで要点を簡潔に示す
    - 推奨セクション: 概要 / 背景 / 変更点 / 確認方法 / 影響範囲 / リスク・互換性 / 関連
    - 具体的・検証可能な情報（再現手順・テスト結果・スクリーンショットやログ等）を含める
-   - `gh pr edit <number> --body-file PR_BODY.md` を用いた本文更新を推奨（長文のクォート崩れ防止）
+   - PR本文は `PR_BODY.md` を唯一のソース（SSOT）として管理する
+   - 作成時は必ず `--body-file PR_BODY.md` を使用してPRを作成する
+   - 変更が生じたら都度 `gh pr edit <number> --body-file PR_BODY.md` で本文を同期する（Web上での直接編集は禁止）
    - 共通テンプレート: `/.github/PULL_REQUEST_TEMPLATE.md`
    - 用途別テンプレート: `/.github/PULL_REQUEST_TEMPLATE/feature.md`, `/.github/PULL_REQUEST_TEMPLATE/bug.md`
    - 個別の長文は `pr/yyyymmdd-*.md` 等で管理し `.gitignore` で除外
@@ -54,6 +56,15 @@
    ### 関連
    関連するIssue/PR/ドキュメントへのリンク。
    ```
+
+### Pull Request 運用チェックリスト（必須）
+- [ ] `PR_BODY.md` を最新内容に更新した
+- [ ] `gh pr create --title "..." --body-file PR_BODY.md` または `gh pr edit <number> --body-file PR_BODY.md` で本文を同期した
+- [ ] 概要/背景/変更点/確認方法/影響範囲/リスク・互換性/関連 が埋まっている
+- [ ] 自動テストがグリーン（`uv run pytest -q`）・Lint/Format がOK（`uv run pre-commit run --all-files`）
+- [ ] UI/UXの変更はスクリーンショット/ログを添付
+- [ ] 影響範囲と互換性・ロールバック方法を明記
+
 
 ## Project Overview
 
