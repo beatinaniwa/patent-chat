@@ -1,3 +1,5 @@
+PR_BODY.md
+pr/*.md
 # Python
 __pycache__/
 *.py[cod]

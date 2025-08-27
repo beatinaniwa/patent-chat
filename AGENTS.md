@@ -25,6 +25,9 @@
    - 推奨セクション: 概要 / 背景 / 変更点 / 確認方法 / 影響範囲 / リスク・互換性 / 関連
    - 具体的・検証可能な情報（再現手順・テスト結果・スクリーンショットやログ等）を含める
    - `gh pr edit <number> --body-file PR_BODY.md` を用いた本文更新を推奨（長文のクォート崩れ防止）
+   - 共通テンプレート: `/.github/PULL_REQUEST_TEMPLATE.md`
+   - 用途別テンプレート: `/.github/PULL_REQUEST_TEMPLATE/feature.md`, `/.github/PULL_REQUEST_TEMPLATE/bug.md`
+   - 個別の長文は `pr/yyyymmdd-*.md` 等で管理し `.gitignore` で除外
 
    例（テンプレート）:
 
