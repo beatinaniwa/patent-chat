@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
 
+from app.file_handler import _format_attachments_for_prompt
+
 DEFAULT_MODEL_NAME = "gemini-2.5-pro"
 
 # Logger (to terminal)
@@ -27,7 +29,13 @@ def _classify_api_error(e: Exception) -> str:
     """エラーを分類してユーザーフレンドリーなメッセージを返す"""
     error_str = str(e).lower()
 
-    if "api_key" in error_str or "api key" in error_str or "unauthorized" in error_str:
+    # Check for 500 internal errors first
+    if "500" in error_str or "internal" in error_str or "servererror" in error_str:
+        return (
+            "Geminiサーバーで一時的な問題が発生しています。"
+            "数秒後に再試行してください。問題が続く場合は時間をおいてお試しください"
+        )
+    elif "api_key" in error_str or "api key" in error_str or "unauthorized" in error_str:
         return (
             "APIキーの設定を確認してください。"
             ".envファイルにGOOGLE_API_KEYまたはGEMINI_API_KEYを設定してください"
@@ -95,7 +103,12 @@ def generate_title(idea_description: str) -> str:
         return (idea_description.strip().splitlines()[0] or "新規アイデア")[:30]
 
 
-def bootstrap_spec(sample_manual_md: str, idea_description: str) -> Tuple[str, Optional[str]]:
+def bootstrap_spec(
+    sample_manual_md: str,
+    idea_description: str,
+    attachments: Optional[List[Dict]] = None,
+    gemini_files: Optional[List] = None,
+) -> Tuple[str, Optional[str]]:
     client = _get_client()
     if client is None:
         error_msg = "APIクライアントの初期化に失敗しました。APIキーの設定を確認してください"
@@ -105,23 +118,65 @@ def bootstrap_spec(sample_manual_md: str, idea_description: str) -> Tuple[str, O
         "あなたは特許明細書の下書きを作る専門家です。与えられた指示書（プロンプト）を最優先で参照し、"
         "不足部分は'未記載'と明示しつつ、Markdownで初稿を作ってください。"
     )
+
+    # Format attachments if provided
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+
     prompt = (
         f"[指示書]\n{sample_manual_md}\n\n"
+        f"[アイデア概要]\n{idea_description}\n"
+        f"{attachments_section}\n"
+        "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
+        "- 添付ファイルの情報を適切に反映させる\n"
+        if attachments
+        else f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n\n"
         "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
     )
     try:
         model_name = _model_name()
         logger.info(
-            "bootstrap_spec: calling model=%s, instruction_len=%d, idea_len=%d",
+            "bootstrap_spec: calling model=%s, instruction_len=%d, idea_len=%d, gemini_files=%d",
             model_name,
             len(sample_manual_md or ""),
             len(idea_description or ""),
+            len(gemini_files or []),
         )
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=f"{system}\n\n{prompt}",
-        )
+
+        # Build contents array with Gemini files if available
+        if gemini_files:
+            # Create contents array - files first, then text prompt
+            # gemini_files should be file objects or file IDs
+            contents = []
+
+            # Add files first
+            for file_info in gemini_files:
+                if isinstance(file_info, str):
+                    # It's a file ID/URI, add directly
+                    contents.append(file_info)
+                elif hasattr(file_info, 'name'):
+                    # It's a file object, use it directly
+                    contents.append(file_info)
+                else:
+                    # Unsupported format, skip
+                    logger.warning(f"Unsupported file format: {type(file_info)}")
+
+            # Add the text prompt after files
+            contents.append(f"{system}\n\n{prompt}")
+
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+            )
+        else:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=f"{system}\n\n{prompt}",
+            )
         _log_response_debug("bootstrap_spec", resp)
         text = (resp.text or "").strip()
         if not text:
@@ -142,6 +197,7 @@ def next_questions(
     num_questions: int = 3,
     version: int = 1,
     is_final: bool = False,
+    attachments: Optional[List[Dict]] = None,
 ) -> Tuple[List[str], Optional[str]]:
     # Don't generate questions if already finalized or at version 5
     if is_final or version >= 5:
@@ -162,8 +218,28 @@ def next_questions(
         "現行ドラフトの不足・曖昧・未記載部分を見つけ、ユーザーが答えやすい"
         "『はい/いいえ』のクローズド質問を優先度順に作成してください。"
     )
+
+    # Format attachments if provided
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル]\n{formatted_attachments}\n"
+
     prompt = (
         f"[指示書]\n{instruction_md}\n\n"
+        f"[現行ドラフト(Markdown)]\n{current_spec_md}\n\n"
+        f"[これまでの対話]\n{transcript_str}\n"
+        f"{attachments_section}\n"
+        "[出力要件]\n"
+        "- 質問のみを出力（前置きや挨拶は不要）\n"
+        "- 各行1問、{num}問\n"
+        "- はい/いいえ で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
+        "- 1つの質問につき1論点、具体的に\n"
+        "- 既に回答済みの重複質問は避ける\n"
+        "- 添付ファイルの内容も考慮する\n".replace("{num}", str(num_questions))
+        if attachments
+        else f"[指示書]\n{instruction_md}\n\n"
         f"[現行ドラフト(Markdown)]\n{current_spec_md}\n\n"
         f"[これまでの対話]\n{transcript_str}\n\n"
         "[出力要件]\n"
@@ -247,6 +323,8 @@ def regenerate_spec(
     instruction_md: str,
     idea_description: str,
     transcript: List[Dict[str, str]],
+    attachments: Optional[List[Dict]] = None,
+    gemini_files: Optional[List] = None,
 ) -> Tuple[str, Optional[str]]:
     """
     Regenerate the entire specification from scratch using all available information.
@@ -315,6 +393,13 @@ def regenerate_spec(
         len(qa_pairs),
     )
 
+    # Format attachments if provided
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+
     system = (
         "あなたは特許明細書の執筆専門家です。与えられた指示書を参考にしつつ、"
         "アイデア概要と質疑応答の内容から、完全な特許明細書を作成してください。"
@@ -323,10 +408,19 @@ def regenerate_spec(
     prompt = (
         f"[作成の指針となる指示書]\n{instruction_md}\n\n"
         f"[発明のアイデア概要]\n{idea_description}\n\n"
-        f"[ヒアリングによる追加情報]\n{qa_section}\n\n"
+        f"[ヒアリングによる追加情報]\n{qa_section}\n"
+        f"{attachments_section}"
         "[重要な作成要件]\n"
         "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
         "- アイデア概要と質疑応答の情報を統合して、実際の特許明細書を作成すること\n"
+    )
+
+    # Add attachment-specific requirement if attachments exist
+    if attachments:
+        prompt += "- 添付ファイルの情報も適切に反映させること\n"
+
+    # Add common requirements
+    prompt += (
         "- 以下のセクションを含む完全な特許明細書を出力：\n"
         "  - 発明の名称\n"
         "  - 技術分野\n"
@@ -344,16 +438,47 @@ def regenerate_spec(
     try:
         model_name = _model_name()
         logger.info(
-            "regenerate_spec: calling model=%s, instruction_len=%d, idea_len=%d, qa_pairs=%d",
+            (
+                "regenerate_spec: calling model=%s, instruction_len=%d, "
+                "idea_len=%d, qa_pairs=%d, gemini_files=%d"
+            ),
             model_name,
             len(instruction_md or ""),
             len(idea_description or ""),
             len(qa_pairs),
+            len(gemini_files or []),
         )
-        resp = client.models.generate_content(
-            model=model_name,
-            contents=f"{system}\n\n{prompt}",
-        )
+
+        # Build contents array with Gemini files if available
+        if gemini_files:
+            # Create contents array - files first, then text prompt
+            # gemini_files should be file objects or file IDs
+            contents = []
+
+            # Add files first
+            for file_info in gemini_files:
+                if isinstance(file_info, str):
+                    # It's a file ID/URI, add directly
+                    contents.append(file_info)
+                elif hasattr(file_info, 'name'):
+                    # It's a file object, use it directly
+                    contents.append(file_info)
+                else:
+                    # Unsupported format, skip
+                    logger.warning(f"Unsupported file format: {type(file_info)}")
+
+            # Add the text prompt after files
+            contents.append(f"{system}\n\n{prompt}")
+
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+            )
+        else:
+            resp = client.models.generate_content(
+                model=model_name,
+                contents=f"{system}\n\n{prompt}",
+            )
         _log_response_debug("regenerate_spec", resp)
         text = (resp.text or "").strip()
         if not text:
