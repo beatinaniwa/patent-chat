@@ -19,6 +19,39 @@
    - View issues: `gh issue list`
    - Create branches and manage workflow through gh commands
 
+4. **Pull Request Descriptions (日本語・Markdown)**:
+   - PRのタイトル・本文は、原則として「わかりやすい日本語」で記述する
+   - 本文はMarkdownで構造化し、見出し・箇条書きで要点を簡潔に示す
+   - 推奨セクション: 概要 / 背景 / 変更点 / 確認方法 / 影響範囲 / リスク・互換性 / 関連
+   - 具体的・検証可能な情報（再現手順・テスト結果・スクリーンショットやログ等）を含める
+   - `gh pr edit <number> --body-file PR_BODY.md` を用いた本文更新を推奨（長文のクォート崩れ防止）
+
+   例（テンプレート）:
+
+   ```md
+   ### 概要
+   変更の一文サマリ。
+
+   ### 背景
+   なぜこの変更が必要か（課題・不具合・要件）。
+
+   ### 変更点
+   - 主要なコード変更（ファイル単位で箇条書き）
+
+   ### 確認方法
+   1. 自動テストの実行コマンドと期待結果
+   2. 手動確認手順（スクリーンショット/ログがあれば添付）
+
+   ### 影響範囲
+   影響を受ける機能・非機能（パフォーマンス/セキュリティ等）。
+
+   ### リスク・互換性
+   既存利用者への互換性、ロールバック方法、フォント/依存関係など。
+
+   ### 関連
+   関連するIssue/PR/ドキュメントへのリンク。
+   ```
+
 ## Project Overview
 
 Patent Chat is a Streamlit web application that helps users draft patent specifications through interactive dialogue with Google Gemini 2.5 Pro. The system generates patent drafts based on user ideas and iteratively refines them through a Q&A process.
