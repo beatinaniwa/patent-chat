@@ -181,12 +181,20 @@ def bootstrap_spec(
         f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n"
         f"{attachments_section}\n"
-        "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
+        "[出力要件]\n"
+        "- 見出しは手順書の順序に従う\n"
+        "- 箇条書き可\n"
+        "- 未確定箇所は '未記載' と記す\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
         "- 添付ファイルの情報を適切に反映させる\n"
         if attachments
         else f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n\n"
-        "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
+        "[出力要件]\n"
+        "- 見出しは手順書の順序に従う\n"
+        "- 箇条書き可\n"
+        "- 未確定箇所は '未記載' と記す\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
     )
     try:
         model_name = _model_name()
@@ -344,7 +352,7 @@ def refine_spec(
         f"手順書:\n{sample_manual_md}\n\n"
         f"対話:\n{transcript_str}\n\n"
         f"現行ドラフト(Markdown):\n{current_spec_md}\n\n"
-        "出力は更新後のMarkdown全文のみ。"
+        "出力は更新後のMarkdown全文のみ。前置きや挨拶は不要（本文のみを出力）。"
     )
     try:
         model_name = _model_name()
@@ -464,6 +472,7 @@ def regenerate_spec(
         "[重要な作成要件]\n"
         "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
         "- アイデア概要と質疑応答の情報を統合して、実際の特許明細書を作成すること\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
     )
 
     # Add attachment-specific requirement if attachments exist
