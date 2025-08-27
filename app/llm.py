@@ -71,6 +71,57 @@ def _get_client() -> Optional[genai.Client]:
         return None
 
 
+def _clean_llm_spec_text(text: str) -> str:
+    """LLM出力のスペック本文から前置き・挨拶文などを除去して返す。
+
+    - 日本語でありがちな導入定型（承知しました/了解しました/それでは 等）を先頭から削る
+    - 先頭の空行を削除
+    - 見出し（# ...）が途中に現れる場合は、それ以前の前置きを丸ごと除去
+    """
+    if not text:
+        return ""
+
+    cleaned = str(text)
+    # BOM等を除去
+    cleaned = cleaned.lstrip("\ufeff").lstrip()
+
+    intro_patterns = [
+        r"^はい[、,。\s]*承知.*?。\s*",
+        r"^承知.*?。\s*",
+        r"^了解.*?。\s*",
+        r"^わかりました.*?。\s*",
+        r"^ありがとうございます.*?。\s*",
+        r"^それでは.*?。\s*",
+        r"^では.*?。\s*",
+        r"^以下.*?(示します|記します|作成します).*?\s*",
+        r"^次の点について.*?。\s*",
+        r"^追加で確認.*?。\s*",
+    ]
+
+    # 複数の前置きが連続する可能性があるため、繰り返し適用
+    while True:
+        changed = False
+        for pattern in intro_patterns:
+            new_cleaned = re.sub(pattern, "", cleaned, flags=re.MULTILINE | re.DOTALL)
+            if new_cleaned != cleaned:
+                cleaned = new_cleaned
+                changed = True
+        # 先頭の空行を除去
+        new_cleaned = re.sub(r"^\s*\n+", "", cleaned)
+        if new_cleaned != cleaned:
+            cleaned = new_cleaned
+            changed = True
+        if not changed:
+            break
+
+    # 見出し行が途中にある場合は、そこから開始させる（前置きの取りこぼし対策）
+    m = re.search(r"(?m)^[ \t]*#{1,6}\s", cleaned)
+    if m and m.start() > 0:
+        cleaned = cleaned[m.start() :]
+
+    return cleaned.strip()
+
+
 def generate_title(idea_description: str) -> str:
     client = _get_client()
     if client is None:
@@ -130,12 +181,20 @@ def bootstrap_spec(
         f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n"
         f"{attachments_section}\n"
-        "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
+        "[出力要件]\n"
+        "- 見出しは手順書の順序に従う\n"
+        "- 箇条書き可\n"
+        "- 未確定箇所は '未記載' と記す\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
         "- 添付ファイルの情報を適切に反映させる\n"
         if attachments
         else f"[指示書]\n{sample_manual_md}\n\n"
         f"[アイデア概要]\n{idea_description}\n\n"
-        "[出力要件]\n- 見出しは手順書の順序に従う\n- 箇条書き可\n- 未確定箇所は '未記載' と記す\n"
+        "[出力要件]\n"
+        "- 見出しは手順書の順序に従う\n"
+        "- 箇条書き可\n"
+        "- 未確定箇所は '未記載' と記す\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
     )
     try:
         model_name = _model_name()
@@ -178,7 +237,7 @@ def bootstrap_spec(
                 contents=f"{system}\n\n{prompt}",
             )
         _log_response_debug("bootstrap_spec", resp)
-        text = (resp.text or "").strip()
+        text = _clean_llm_spec_text((resp.text or "").strip())
         if not text:
             error_msg = "APIから空の応答を受け取りました。再試行してください"
             logger.error("bootstrap_spec: Empty response text; using fallback skeleton.")
@@ -293,7 +352,7 @@ def refine_spec(
         f"手順書:\n{sample_manual_md}\n\n"
         f"対話:\n{transcript_str}\n\n"
         f"現行ドラフト(Markdown):\n{current_spec_md}\n\n"
-        "出力は更新後のMarkdown全文のみ。"
+        "出力は更新後のMarkdown全文のみ。前置きや挨拶は不要（本文のみを出力）。"
     )
     try:
         model_name = _model_name()
@@ -309,7 +368,7 @@ def refine_spec(
             contents=prompt,
         )
         _log_response_debug("refine_spec", resp)
-        text = (resp.text or "").strip()
+        text = _clean_llm_spec_text((resp.text or "").strip())
         if not text:
             logger.warning("refine_spec: Empty response; leaving spec unchanged.")
             return current_spec_md
@@ -413,6 +472,7 @@ def regenerate_spec(
         "[重要な作成要件]\n"
         "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
         "- アイデア概要と質疑応答の情報を統合して、実際の特許明細書を作成すること\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
     )
 
     # Add attachment-specific requirement if attachments exist
@@ -480,7 +540,7 @@ def regenerate_spec(
                 contents=f"{system}\n\n{prompt}",
             )
         _log_response_debug("regenerate_spec", resp)
-        text = (resp.text or "").strip()
+        text = _clean_llm_spec_text((resp.text or "").strip())
         if not text:
             error_msg = "APIから空の応答を受け取りました。再試行してください"
             logger.error("regenerate_spec: Empty response; using fallback skeleton.")
