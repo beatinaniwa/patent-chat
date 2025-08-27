@@ -87,8 +87,10 @@ def upload_to_gemini(file_bytes: bytes, filename: str, mime_type: str) -> Tuple[
         file_obj = io.BytesIO(file_bytes)
         file_obj.name = filename  # Set the filename attribute
         uploaded_file = client.files.upload(file=file_obj, config=dict(mime_type=mime_type))
-        logger.info(f"Successfully uploaded {filename} with name: {uploaded_file.name}")
-        return uploaded_file.name, mime_type
+        # Return the file ID so that callers can reference it reliably
+        uploaded_id = getattr(uploaded_file, "id", "unknown")
+        logger.info(f"Successfully uploaded {filename} with id: {uploaded_id}")
+        return getattr(uploaded_file, "id", None), mime_type
     except Exception as e:
         # Avoid logging file content - only log the exception message
         error_msg = str(e)
