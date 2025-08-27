@@ -151,7 +151,7 @@ def bootstrap_spec(
         if gemini_files:
             # Create contents array - files first, then text prompt
             # gemini_files should be file objects or file IDs
-            contents = []
+            contents: List[Any] = []
 
             # Add files first
             for file_info in gemini_files:
@@ -453,7 +453,7 @@ def regenerate_spec(
         if gemini_files:
             # Create contents array - files first, then text prompt
             # gemini_files should be file objects or file IDs
-            contents = []
+            contents: List[Any] = []
 
             # Add files first
             for file_info in gemini_files:
@@ -615,11 +615,16 @@ def check_spec_completeness(
         _log_response_debug("check_spec_completeness", resp)
         text = (resp.text or "").strip()
 
-        # Extract numeric score
-        try:
-            score = float(re.search(r'\d+(?:\.\d+)?', text).group())
-            score = min(100, max(0, score))  # Clamp to 0-100
-        except (AttributeError, ValueError):
+        # Extract numeric score safely
+        m = re.search(r'\d+(?:\.\d+)?', text)
+        if m:
+            try:
+                score = float(m.group())
+                score = min(100, max(0, score))  # Clamp to 0-100
+            except ValueError:
+                logger.warning("check_spec_completeness: Could not parse score, using default")
+                score = 70.0
+        else:
             logger.warning("check_spec_completeness: Could not parse score, using default")
             score = 70.0
 

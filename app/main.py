@@ -4,7 +4,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import List, Tuple
+from typing import Any, List, Tuple, cast
 
 import streamlit as st
 from dotenv import load_dotenv
@@ -148,7 +148,7 @@ def new_idea_form():
             status.update(label="添付ファイルを処理中…", state="running")
             attachments = []
             attachment_dicts = []
-            gemini_files = []
+            gemini_files: List[Any] = []
 
             # Get Gemini client to fetch file objects
             import logging
@@ -322,7 +322,7 @@ def _prepare_attachment_dicts(idea: Idea) -> Tuple[List[dict], List]:
     from app.file_handler import extract_text_from_file
 
     attachment_dicts = []
-    gemini_files = []
+    gemini_files: List[Any] = []
 
     # Get Gemini client to fetch file objects
     import logging
@@ -350,7 +350,7 @@ def _prepare_attachment_dicts(idea: Idea) -> Tuple[List[dict], List]:
                 logger.warning(f"Failed to get Gemini file object for {att.gemini_file_id}")
         elif att.gemini_file_id:
             # No client available, just store the ID
-            gemini_files.append(att.gemini_file_id)
+            gemini_files.append(cast(Any, att.gemini_file_id))
             # Still add to dicts for backward compatibility
             attachment_dicts.append(
                 {
