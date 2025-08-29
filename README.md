@@ -28,6 +28,20 @@ uv sync
 uv run streamlit run app/main.py
 ```
 
+## Basic 認証（アプリ内）
+- 画面表示前にログインを要求する簡易的な Basic 認証を追加しました。
+- 有効化は環境変数で制御します（未設定なら無効）。
+
+環境変数（`.env` など）：
+```dotenv
+BASIC_AUTH_USERNAME=your_user
+BASIC_AUTH_PASSWORD=your_password
+```
+
+ヒント:
+- ログイン後はサイドバーから「ログアウト」できます。
+- 本実装はアプリ内のログインです。HTTP レベルの厳密な Basic 認証が必要な場合は、Nginx などのリバースプロキシで設定してください（例: `auth_basic`）。
+
 ## 構成
 - `app/main.py`: Streamlit エントリポイント
 - `app/state.py`: アプリ全体の状態管理（SessionState）
