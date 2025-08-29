@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.auth import render_login_gate, render_sidebar_user
 from app.export import export_docx, export_pdf
 from app.file_handler import process_uploaded_file_with_gemini
 from app.llm import (
@@ -794,12 +795,16 @@ def hearing_ui(idea: Idea):
 def main():
     load_dotenv()
     st.set_page_config(page_title=APP_TITLE, layout="wide")
+    # Basic authentication gate (enabled via env: BASIC_AUTH_USERNAME/PASSWORD)
+    render_login_gate(st)
     st.title(APP_TITLE)
     st.caption("特許出願アイデアを対話で具体化し、明細書草案を生成します。")
 
     # Dark theme note: instruct Streamlit to use base dark theme via config.toml if desired
 
     init_session_state()
+    # Sidebar user info + logout when auth enabled
+    render_sidebar_user(st)
     sidebar_ui()
 
     ideas: List[Idea] = st.session_state.ideas
