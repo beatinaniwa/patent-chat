@@ -26,20 +26,18 @@ def load_ideas() -> List[Idea]:
     ideas: List[Idea] = []
     for obj in raw.get("ideas", []):
         # Convert datetime strings back to datetime objects in attachments
-        if "attachments" in obj:
-            converted_attachments = []
-            for attachment_dict in obj["attachments"]:
-                if "upload_time" in attachment_dict and isinstance(
-                    attachment_dict["upload_time"], str
-                ):
-                    attachment_dict["upload_time"] = datetime.fromisoformat(
-                        attachment_dict["upload_time"]
-                    )
-                # Import Attachment here to avoid circular import issues
-                from .state import Attachment
+        attachments = obj.get("attachments") or []
+        converted_attachments = []
+        for attachment_dict in attachments:
+            if "upload_time" in attachment_dict and isinstance(attachment_dict["upload_time"], str):
+                attachment_dict["upload_time"] = datetime.fromisoformat(
+                    attachment_dict["upload_time"]
+                )
+            # Import Attachment here to avoid circular import issues
+            from .state import Attachment
 
-                converted_attachments.append(Attachment(**attachment_dict))
-            obj["attachments"] = converted_attachments
+            converted_attachments.append(Attachment(**attachment_dict))
+        obj["attachments"] = converted_attachments
         ideas.append(Idea(**obj))
     return ideas
 
