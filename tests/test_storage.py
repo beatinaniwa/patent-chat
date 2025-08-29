@@ -93,3 +93,33 @@ def test_save_and_load_ideas_with_datetime_fix():
         assert loaded_ideas[0].attachments[0].filename == "test.pdf"
 
     tmp_path.unlink(missing_ok=True)
+
+
+def test_load_ideas_with_null_attachments():
+    """load_ideas should handle null attachments gracefully"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+        tmp.write(
+            json.dumps(
+                {
+                    "ideas": [
+                        {
+                            "id": "null-1",
+                            "title": "t",
+                            "category": "c",
+                            "description": "d",
+                            "attachments": None,
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            )
+        )
+        tmp_path = Path(tmp.name)
+
+    with patch("app.storage.IDEAS_PATH", tmp_path), patch("app.storage.DATA_DIR", tmp_path.parent):
+        ideas = load_ideas()
+        assert len(ideas) == 1
+        assert ideas[0].attachments == []
+
+    tmp_path.unlink(missing_ok=True)
