@@ -20,10 +20,10 @@ uv sync
 # .env に以下を設定するか、shell に export してください
 # GOOGLE_API_KEY=xxxxx  # または GEMINI_API_KEY=xxxxx
 # GEMINI_MODEL=gemini-2.5-pro          # 仕様生成系の既定モデル（UI で変更可）
-# GEMINI_TITLE_MODEL=gemini-2.5-flash  # タイトル生成の既定モデル（高速）
 ```
 
 アプリ起動後、サイドバーの「Geminiモデル」から Pro と Flash を切り替えられます。
+タイトル生成には常に gemini-2.5-flash が使用されます。
 
 ## 開発サーバ起動
 ```bash
