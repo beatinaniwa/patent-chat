@@ -55,8 +55,9 @@ def _classify_api_error(e: Exception) -> str:
 
 
 def _title_model_name() -> str:
-    # タイトル生成は軽量・高速な flash を既定とする
-    return os.getenv("GEMINI_TITLE_MODEL", "gemini-2.5-flash")
+    """タイトル生成に利用する Gemini モデル名を返す"""
+    # タイトル生成は常に軽量な Flash モデルを使用し、環境変数による上書きは不可
+    return "gemini-2.5-flash"
 
 
 def _get_client() -> Optional[genai.Client]:

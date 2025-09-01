@@ -1,11 +1,11 @@
-# Patent Chat (Streamlit + Gemini 2.5 Pro)
+# Patent Chat (Streamlit + Gemini 2.5)
 
 特許出願アイデアを対話で具体化し、特許明細書草案を生成する Web アプリです。
 
 ## 要件
 - Python 3.12
 - パッケージ管理: uv
-- LLM: Google Gemini 2.5 Pro（Google GenAI SDK）
+- LLM: Google Gemini 2.5（Pro/Flash 切替可能、Google GenAI SDK）
 
 ## セットアップ
 ```bash
@@ -19,9 +19,11 @@ uv sync
 # 環境変数設定（例）
 # .env に以下を設定するか、shell に export してください
 # GOOGLE_API_KEY=xxxxx  # または GEMINI_API_KEY=xxxxx
-# GEMINI_MODEL=gemini-2.5-pro          # 仕様生成系の既定モデル
-# GEMINI_TITLE_MODEL=gemini-2.5-flash  # タイトル生成の既定モデル（高速）
+# GEMINI_MODEL=gemini-2.5-pro          # 仕様生成系の既定モデル（UI で変更可）
 ```
+
+アプリ起動後、サイドバーの「Geminiモデル」から Pro と Flash を切り替えられます。
+タイトル生成には常に gemini-2.5-flash が使用されます。
 
 ## 開発サーバ起動
 ```bash

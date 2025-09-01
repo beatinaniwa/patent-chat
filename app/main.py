@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import sys
 import uuid
@@ -18,6 +19,7 @@ from app.auth import render_login_gate, render_sidebar_user
 from app.export import export_docx, export_pdf
 from app.file_handler import process_uploaded_file_with_gemini
 from app.llm import (
+    DEFAULT_MODEL_NAME,
     bootstrap_spec,
     check_spec_completeness,
     generate_title,
@@ -76,7 +78,9 @@ def _clean_ai_message(content: str) -> str:
 
 def init_session_state() -> None:
     if "app_state" not in st.session_state:
-        st.session_state.app_state = AppState()
+        default_model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME)
+        st.session_state.app_state = AppState(gemini_model=default_model)
+        os.environ["GEMINI_MODEL"] = default_model
     if "ideas" not in st.session_state:
         st.session_state.ideas = load_ideas()
 
@@ -85,6 +89,15 @@ def sidebar_ui():
     st.sidebar.title("アイデア一覧")
     ideas: List[Idea] = st.session_state.ideas
     state: AppState = st.session_state.app_state
+
+    model_options = ["gemini-2.5-pro", "gemini-2.5-flash"]
+    current_index = (
+        model_options.index(state.gemini_model) if state.gemini_model in model_options else 0
+    )
+    selected_model = st.sidebar.selectbox("Geminiモデル", model_options, index=current_index)
+    if selected_model != state.gemini_model:
+        state.gemini_model = selected_model
+        os.environ["GEMINI_MODEL"] = selected_model
 
     # New idea button
     if st.sidebar.button("＋ 新規アイデアを作成", use_container_width=True):

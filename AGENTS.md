@@ -43,5 +43,5 @@
 - Quality gates: `uv run pytest -q` and `uv run pre-commit run --all-files` must pass
 
 ## Security & Configuration
-- `.env` (not committed): `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_TITLE_MODEL`
+- `.env` (not committed): `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `GEMINI_MODEL`
 - Avoid logging secrets; validate graceful fallbacks when API unavailable

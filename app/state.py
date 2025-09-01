@@ -4,6 +4,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from app.llm import DEFAULT_MODEL_NAME
+
 
 @dataclass
 class Attachment:
@@ -40,6 +42,8 @@ class AppState:
     selected_idea_id: Optional[str] = None
     # UI: new idea form visibility
     show_new_idea_form: bool = False
+    # Selected Gemini model (e.g., gemini-2.5-pro or gemini-2.5-flash)
+    gemini_model: str = DEFAULT_MODEL_NAME
 
     def to_dict(self) -> Dict:
         return asdict(self)
