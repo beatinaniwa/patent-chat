@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 import sys
@@ -33,6 +34,9 @@ from app.storage import delete_idea, get_idea, load_ideas, save_ideas
 APP_TITLE = "Patent Chat"
 DEFAULT_CATEGORY = "防災"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Suppress very noisy PDF parsing warnings (e.g., advanced encodings)
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 
 def _load_instruction_markdown() -> str:
@@ -190,6 +194,7 @@ def new_idea_form():
                         upload_time=file_data["upload_time"],
                         gemini_file_id=file_data.get("gemini_file_id"),
                         gemini_mime_type=file_data.get("gemini_mime_type"),
+                        extracted_text=file_data.get("extracted_text"),
                     )
                     attachments.append(attachment)
                     attachment_dicts.append(
@@ -374,16 +379,26 @@ def _prepare_attachment_dicts(idea: Idea) -> Tuple[List[dict], List]:
                 }
             )
         else:
-            # No Gemini file ID, use local extraction
-            file_bytes = base64.b64decode(att.content_base64)
-            extracted_text = extract_text_from_file(file_bytes, att.filename)
-            attachment_dicts.append(
-                {
-                    "filename": att.filename,
-                    "extracted_text": extracted_text,
-                    "comment": att.comment,
-                }
-            )
+            # No Gemini file ID: use stored extracted_text if available to avoid re-parsing
+            if getattr(att, "extracted_text", None):
+                attachment_dicts.append(
+                    {
+                        "filename": att.filename,
+                        "extracted_text": att.extracted_text or "",
+                        "comment": att.comment,
+                    }
+                )
+            else:
+                # Fall back to local extraction
+                file_bytes = base64.b64decode(att.content_base64)
+                extracted_text = extract_text_from_file(file_bytes, att.filename)
+                attachment_dicts.append(
+                    {
+                        "filename": att.filename,
+                        "extracted_text": extracted_text,
+                        "comment": att.comment,
+                    }
+                )
 
     return attachment_dicts, gemini_files
 
@@ -629,6 +644,9 @@ def hearing_ui(idea: Idea):
                             comment=file_data["comment"],
                             file_type=file_data["file_type"],
                             upload_time=file_data["upload_time"],
+                            gemini_file_id=file_data.get("gemini_file_id"),
+                            gemini_mime_type=file_data.get("gemini_mime_type"),
+                            extracted_text=file_data.get("extracted_text"),
                         )
                         idea.attachments.append(attachment)
                         st.success(f"{uploaded_file.name} を追加しました")
