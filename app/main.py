@@ -94,6 +94,15 @@ def sidebar_ui():
     ideas: List[Idea] = st.session_state.ideas
     state: AppState = st.session_state.app_state
 
+    # Always-available Home navigation (without logging out)
+    if st.sidebar.button("🏠 トップへ戻る", use_container_width=True):
+        state.selected_idea_id = None
+        state.show_new_idea_form = False
+        # Clear transient flags such as hearing start
+        if "start_hearing" in st.session_state:
+            st.session_state.pop("start_hearing", None)
+        st.rerun()
+
     model_options = ["gemini-2.5-pro", "gemini-2.5-flash"]
     current_index = (
         model_options.index(state.gemini_model) if state.gemini_model in model_options else 0
