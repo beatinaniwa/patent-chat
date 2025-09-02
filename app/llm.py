@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
@@ -52,6 +53,26 @@ def _classify_api_error(e: Exception) -> str:
         # エラーメッセージの最初の100文字を表示
         error_msg = str(e)[:200] if str(e) else "不明なエラー"
         return f"予期しないエラーが発生しました: {error_msg}"
+
+
+def _is_internal_server_error(e: Exception) -> bool:
+    """500やINTERNAL系のサーバーエラーかをゆるく判定する。
+
+    google.genai.errors.ServerError 500 INTERNAL を想定しつつ、
+    文言ベースでも検出できるようにしておく。
+    """
+    try:
+        # メッセージ文字列での判定（ライブラリに依存しない）
+        s = (str(e) or "").lower()
+        if "500" in s or "internal" in s or "servererror" in s:
+            return True
+        # 追加のヒント（ステータスコード属性があれば参照）
+        code = getattr(e, "status_code", None)
+        if code == 500:
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _title_model_name() -> str:
@@ -496,61 +517,77 @@ def regenerate_spec(
         "- 指示書のタイトルや本文をそのまま含めないこと\n"
     )
 
-    try:
-        model_name = _model_name()
-        logger.info(
-            (
-                "regenerate_spec: calling model=%s, instruction_len=%d, "
-                "idea_len=%d, qa_pairs=%d, gemini_files=%d"
-            ),
-            model_name,
-            len(instruction_md or ""),
-            len(idea_description or ""),
-            len(qa_pairs),
-            len(gemini_files or []),
-        )
+    model_name = _model_name()
+    logger.info(
+        (
+            "regenerate_spec: calling model=%s, instruction_len=%d, "
+            "idea_len=%d, qa_pairs=%d, gemini_files=%d"
+        ),
+        model_name,
+        len(instruction_md or ""),
+        len(idea_description or ""),
+        len(qa_pairs),
+        len(gemini_files or []),
+    )
 
-        # Build contents array with Gemini files if available
-        if gemini_files:
-            # Create contents array - files first, then text prompt
-            # gemini_files should be file objects or file IDs
-            contents: List[Any] = []
+    # Build base contents so we can reuse across retries/models
+    text_contents = f"{system}\n\n{prompt}"
+    file_contents_base: Optional[List[Any]] = None
+    if gemini_files:
+        base: List[Any] = []
+        for file_info in gemini_files:
+            if isinstance(file_info, str):
+                base.append(file_info)
+            elif hasattr(file_info, "name"):
+                base.append(file_info)
+            else:
+                logger.warning(f"Unsupported file format: {type(file_info)}")
+        file_contents_base = base
 
-            # Add files first
-            for file_info in gemini_files:
-                if isinstance(file_info, str):
-                    # It's a file ID/URI, add directly
-                    contents.append(file_info)
-                elif hasattr(file_info, 'name'):
-                    # It's a file object, use it directly
-                    contents.append(file_info)
-                else:
-                    # Unsupported format, skip
-                    logger.warning(f"Unsupported file format: {type(file_info)}")
+    # Attempts: initial -> retry(same model) -> flash fallback
+    attempts: List[Tuple[str, str]] = [
+        (model_name, "initial"),
+        (model_name, "retry"),
+        ("gemini-2.5-flash", "flash_fallback"),
+    ]
 
-            # Add the text prompt after files
-            contents.append(f"{system}\n\n{prompt}")
-
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-            )
-        else:
-            resp = client.models.generate_content(
-                model=model_name,
-                contents=f"{system}\n\n{prompt}",
-            )
-        _log_response_debug("regenerate_spec", resp)
-        text = _clean_llm_spec_text((resp.text or "").strip())
-        if not text:
-            error_msg = "APIから空の応答を受け取りました。再試行してください"
-            logger.error("regenerate_spec: Empty response; using fallback skeleton.")
+    last_error: Optional[Exception] = None
+    for mdl, phase in attempts:
+        if phase == "retry":
+            # small backoff before retrying
+            time.sleep(1.2)
+            logger.info("regenerate_spec: retrying after 500 with same model")
+        elif phase == "flash_fallback":
+            logger.info("regenerate_spec: switching to gemini-2.5-flash after repeated 500s")
+        try:
+            if file_contents_base is not None:
+                contents = list(file_contents_base)
+                contents.append(text_contents)
+                resp = client.models.generate_content(model=mdl, contents=contents)
+            else:
+                resp = client.models.generate_content(model=mdl, contents=text_contents)
+            _log_response_debug("regenerate_spec", resp)
+            text = _clean_llm_spec_text((getattr(resp, "text", "") or "").strip())
+            if not text:
+                error_msg = "APIから空の応答を受け取りました。再試行してください"
+                logger.error("regenerate_spec: Empty response; using fallback skeleton.")
+                return _fallback_skeleton(instruction_md, idea_description), error_msg
+            return text, None
+        except Exception as e:
+            last_error = e
+            if _is_internal_server_error(e):
+                # If this was the initial attempt, allow retry; otherwise continue to next attempt
+                logger.warning("regenerate_spec: 500 INTERNAL detected: %s", str(e)[:200])
+                continue
+            # Non-500 error: classify and fail fast
+            error_msg = _classify_api_error(e)
+            logger.exception("regenerate_spec: Gemini API error; using fallback skeleton.")
             return _fallback_skeleton(instruction_md, idea_description), error_msg
-        return text, None
-    except Exception as e:
-        error_msg = _classify_api_error(e)
-        logger.exception("regenerate_spec: Gemini API error; using fallback skeleton.")
-        return _fallback_skeleton(instruction_md, idea_description), error_msg
+
+    # All attempts failed (likely repeated 500)
+    error_msg = _classify_api_error(last_error) if last_error else "不明なエラー"
+    logger.exception("regenerate_spec: Gemini API error after retries; using fallback skeleton.")
+    return _fallback_skeleton(instruction_md, idea_description), error_msg
 
 
 def _log_response_debug(operation: str, resp: Any) -> None:
