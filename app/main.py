@@ -90,7 +90,6 @@ def init_session_state() -> None:
 
 
 def sidebar_ui():
-    st.sidebar.title("アイデア一覧")
     ideas: List[Idea] = st.session_state.ideas
     state: AppState = st.session_state.app_state
 
@@ -111,6 +110,9 @@ def sidebar_ui():
     if selected_model != state.gemini_model:
         state.gemini_model = selected_model
         os.environ["GEMINI_MODEL"] = selected_model
+
+    # Move the idea list title below the model selector
+    st.sidebar.title("アイデア一覧")
 
     # New idea button
     if st.sidebar.button("＋ 新規アイデアを作成", use_container_width=True):
