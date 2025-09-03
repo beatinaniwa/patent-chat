@@ -69,11 +69,11 @@ class TestQuestionGeneration(unittest.TestCase):
         self.assertIsNone(error)
 
     @patch('app.llm._get_client')
-    def test_no_questions_at_version_5(self, mock_client):
-        """Test that no questions are generated at version 5."""
-        mock_client.return_value = MagicMock()
+    def test_questions_even_at_version_5_when_not_final(self, mock_client):
+        """Questions are still generated at version 5 if not final."""
+        # Force fallback questions to avoid real API call
+        mock_client.return_value = None
 
-        # Test with version=5
         questions, error = next_questions(
             instruction_md="test",
             transcript=[],
@@ -82,8 +82,7 @@ class TestQuestionGeneration(unittest.TestCase):
             version=5,
             is_final=False,
         )
-        self.assertEqual(questions, [])
-        self.assertIsNone(error)
+        self.assertGreater(len(questions), 0)
 
     @patch('app.llm._get_client')
     def test_questions_generated_before_final(self, mock_client):
@@ -108,18 +107,20 @@ class TestSpecCompleteness(unittest.TestCase):
     """Test cases for specification completeness checking."""
 
     @patch('app.llm._get_client')
-    def test_version_5_always_complete(self, mock_client):
-        """Test that version 5 is always considered complete."""
-        mock_client.return_value = MagicMock()
+    def test_version_5_uses_completeness_check(self, mock_client):
+        """Version 5 should not be auto-final; uses completeness logic."""
+        # Mock API response with high score
+        mock_response = MagicMock()
+        mock_response.text = "92"
+        mock_client.return_value.models.generate_content.return_value = mock_response
 
         is_complete, score = check_spec_completeness(
             instruction_md="test", current_spec_md="short draft", version=5
         )
         self.assertTrue(is_complete)
-        self.assertEqual(score, 100.0)
-
-        # Should not call the client for version 5
-        mock_client.assert_not_called()
+        self.assertEqual(score, 92.0)
+        # Client should be called as no auto-final by version
+        mock_client.assert_called()
 
     @patch('app.llm._get_client')
     def test_completeness_with_placeholders(self, mock_client):
@@ -207,9 +208,10 @@ class TestVersionLimits(unittest.TestCase):
         self.assertTrue(idea.is_final)
 
     @patch('app.llm._get_client')
-    def test_no_questions_beyond_version_5(self, mock_client):
-        """Test that no questions are generated for versions > 5."""
-        mock_client.return_value = MagicMock()
+    def test_questions_generated_beyond_version_5_when_not_final(self, mock_client):
+        """Questions are generated for versions > 5 when not final."""
+        # Force fallback questions to avoid real API call
+        mock_client.return_value = None
 
         for version in [5, 6, 10]:
             questions, error = next_questions(
@@ -219,8 +221,7 @@ class TestVersionLimits(unittest.TestCase):
                 version=version,
                 is_final=False,
             )
-            self.assertEqual(questions, [], f"Version {version} should generate no questions")
-            self.assertIsNone(error)
+            self.assertGreater(len(questions), 0, f"Version {version} should generate questions")
 
 
 if __name__ == "__main__":
