@@ -558,22 +558,17 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                     idea.draft_spec_markdown = spec_result
                     idea.draft_version += 1
 
-                # Check if this should be the final version
-                if idea.draft_version >= 5:
+                # Check if this should be the final version based on completeness only
+                is_complete, score = check_spec_completeness(
+                    manual_md, idea.draft_spec_markdown, idea.draft_version
+                )
+                print(
+                    f"DEBUG: Completeness check - is_complete={is_complete}, "
+                    f"score={score}, version={idea.draft_version}"
+                )
+                if is_complete:
                     idea.is_final = True
-                    print(f"DEBUG: Set is_final=True due to version={idea.draft_version} >= 5")
-                else:
-                    # Check completeness for versions 2-4
-                    is_complete, score = check_spec_completeness(
-                        manual_md, idea.draft_spec_markdown, idea.draft_version
-                    )
-                    print(
-                        f"DEBUG: Completeness check - is_complete={is_complete}, "
-                        f"score={score}, version={idea.draft_version}"
-                    )
-                    if is_complete:
-                        idea.is_final = True
-                        print(f"DEBUG: Set is_final=True due to completeness score={score}")
+                    print(f"DEBUG: Set is_final=True due to completeness score={score}")
 
                 save_ideas(st.session_state.ideas)
 

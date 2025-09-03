@@ -280,8 +280,8 @@ def next_questions(
     is_final: bool = False,
     attachments: Optional[List[Dict]] = None,
 ) -> Tuple[List[str], Optional[str]]:
-    # Don't generate questions if already finalized or at version 5
-    if is_final or version >= 5:
+    # Don't generate questions if already finalized
+    if is_final:
         return [], None
 
     client = _get_client()
@@ -666,10 +666,6 @@ def check_spec_completeness(
         tuple: (is_complete, score) where is_complete is True if ready to finalize,
                and score is a completeness percentage (0-100)
     """
-    # Version 5 is always final
-    if version >= 5:
-        return True, 100.0
-
     # For earlier versions, check quality
     client = _get_client()
     if client is None:
