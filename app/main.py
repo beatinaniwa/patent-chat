@@ -29,6 +29,7 @@ from app.llm import (
     next_questions,
     refine_document,
     regenerate_spec,
+    update_spec_from_invention,
 )
 from app.spec_builder import add_revision, append_assistant_message, append_user_answer
 from app.state import AppState, Attachment, Idea, Revision
@@ -750,28 +751,19 @@ def _render_pending_questions(
 
 
 def _render_refine_ui(idea: Idea) -> None:
-    st.subheader("LLM修正（自然文の修正指示を反映）")
+    st.subheader("LLM修正（発明説明書のみ対象）")
     with st.form(f"refine-form-{idea.id}"):
         feedback = st.text_area(
             "修正指示を入力",
             placeholder=("例: 第2章の課題を具体化し、効果では根拠を明記。請求項は文末表現を統一。"),
             height=120,
         )
-        target = st.radio(
-            "対象文書",
-            options=["発明説明書", "明細書ドラフト"],
-            index=0,
-            horizontal=True,
-        )
+        st.caption("対象: 発明説明書（採用時に明細書ドラフトも自動同期）")
         submitted = st.form_submit_button("プレビュー作成", type="primary")
 
     if submitted:
-        doc_type = "explanation" if target == "発明説明書" else "spec"
-        original = (
-            idea.invention_description_markdown
-            if doc_type == "explanation"
-            else idea.draft_spec_markdown
-        )
+        doc_type = "explanation"
+        original = idea.invention_description_markdown
         with st.status("修正案を生成中…", expanded=False):
             refined, err = refine_document(original, feedback, doc_type=doc_type)
         if err:
@@ -805,8 +797,7 @@ def _render_refine_ui(idea: Idea) -> None:
 
         # Export preview without saving
         exp_cols = st.columns(2)
-        suffix = "発明説明書PRV" if preview["doc_type"] == "explanation" else "明細書PRV"
-        name_base = f"{idea.title}_{suffix}"
+        name_base = f"{idea.title}_発明説明書プレビュー"
         name_docx_p, data_docx_p = export_docx(name_base, preview["refined"])
         exp_cols[0].download_button(
             "プレビューをWordで保存",
@@ -830,19 +821,12 @@ def _render_refine_ui(idea: Idea) -> None:
         if col_a.button("採用して保存", type="primary"):
             doc_type = preview["doc_type"]
             text = preview["refined"]
-            before = (
-                idea.invention_description_markdown
-                if doc_type == "explanation"
-                else idea.draft_spec_markdown
-            )
+            before = idea.invention_description_markdown
             if not text or text.strip() == (before or "").strip():
                 st.info("内容に変更がありません。")
             else:
-                # Apply to idea
-                if doc_type == "explanation":
-                    idea.invention_description_markdown = text
-                else:
-                    idea.draft_spec_markdown = text
+                # Apply to idea (explanation only)
+                idea.invention_description_markdown = text
 
                 # Record revision
                 import uuid as _uuid
@@ -860,8 +844,38 @@ def _render_refine_ui(idea: Idea) -> None:
                     },
                 )
                 add_revision(idea, rev, max_history=50)
+                # Auto-sync spec draft to match the updated explanation
+                manual_md = _load_instruction_markdown()
+                old_spec = idea.draft_spec_markdown
+                with st.status("明細書ドラフトを同期更新中…", expanded=False):
+                    new_spec, spec_err = update_spec_from_invention(
+                        manual_md, idea.invention_description_markdown, old_spec
+                    )
+                if spec_err:
+                    st.warning(f"⚠️ 明細書ドラフトの同期で問題が発生しました: {spec_err}")
+                else:
+                    idea.draft_spec_markdown = new_spec
+                    # Record spec revision history as well
+                    spec_diff = unified_markdown_diff(
+                        old_spec, new_spec, fromfile="before_spec", tofile="after_spec"
+                    )
+                    spec_rev = Revision(
+                        id=str(_uuid.uuid4()),
+                        doc_type="spec",
+                        feedback="Auto-sync with explanation refine",
+                        text=new_spec,
+                        diff=spec_diff,
+                        model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME),
+                        meta={
+                            "sync": "from explanation",
+                            "from": f"{len((old_spec or ''))} chars",
+                            "to": f"{len((new_spec or ''))} chars",
+                        },
+                    )
+                    add_revision(idea, spec_rev, max_history=50)
+
                 save_ideas(st.session_state.ideas)
-                st.success("修正を保存しました。")
+                st.success("修正を保存し、明細書ドラフトを同期しました。")
                 # Clear preview
                 st.session_state.pop(f"refine_preview_{idea.id}", None)
                 st.rerun()

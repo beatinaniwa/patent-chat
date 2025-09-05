@@ -512,6 +512,53 @@ def refine_document(
         return original, _classify_api_error(e)
 
 
+def update_spec_from_invention(
+    instruction_md: str,
+    invention_description_md: str,
+    current_spec_md: str,
+) -> Tuple[str, Optional[str]]:
+    """Update a specification draft to align with a refined invention description.
+
+    Keeps the spec's overall structure and numbering while reflecting the
+    invention description's content and terminology. Returns updated spec
+    markdown and optional error message.
+    """
+    client = _get_client()
+    if client is None:
+        logger.warning("update_spec_from_invention: No client; leaving spec unchanged.")
+        return current_spec_md, (
+            "APIクライアントの初期化に失敗しました。APIキーの設定を確認してください"
+        )
+
+    system = (
+        "あなたは企業の知財部に所属する熟練の弁理士です。"
+        "以下の『発明説明書』の内容に整合するよう、『明細書ドラフト』を更新してください。"
+    )
+    prompt = (
+        f"[作成の指針]\n{instruction_md}\n\n"
+        f"[発明説明書（整合対象・最新版）]\n{invention_description_md}\n\n"
+        f"[現行の明細書ドラフト（Markdown）]\n{current_spec_md}\n\n"
+        "[出力要件]\n"
+        "- 構成・章立て・番号（請求項番号等）は維持しつつ整合させる\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
+        "- 指示書の文はそのまま出力に含めない\n"
+        "- 情報が不足している箇所は '未記載' または '（要確認）' と明記\n"
+    )
+    try:
+        model_name = _model_name()
+        contents = f"{system}\n\n{prompt}"
+        resp = client.models.generate_content(model=model_name, contents=contents)
+        _log_response_debug("update_spec_from_invention", resp)
+        text = _clean_llm_spec_text((getattr(resp, "text", "") or "").strip())
+        if not text:
+            logger.error("update_spec_from_invention: Empty response; leaving spec unchanged.")
+            return current_spec_md, "APIから空の応答を受け取りました。再試行してください"
+        return text, None
+    except Exception as e:
+        logger.exception("update_spec_from_invention: API error; leaving spec unchanged.")
+        return current_spec_md, _classify_api_error(e)
+
+
 def refine_spec(
     sample_manual_md: str, transcript: List[Dict[str, str]], current_spec_md: str
 ) -> str:
