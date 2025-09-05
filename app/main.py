@@ -23,6 +23,7 @@ from app.llm import (
     DEFAULT_MODEL_NAME,
     bootstrap_spec,
     check_spec_completeness,
+    generate_invention_description,
     generate_title,
     next_questions,
     regenerate_spec,
@@ -42,6 +43,17 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 def _load_instruction_markdown() -> str:
     """Load drafting instruction document with fallback to sample.md."""
     primary = PROJECT_ROOT / "LLM_Prompt_for_Patent_Application_Drafting_from_Idea.md"
+    fallback = PROJECT_ROOT / "sample.md"
+    path = primary if primary.exists() else fallback
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _load_invention_instruction_markdown() -> str:
+    """Load invention description instruction document with fallback to sample.md."""
+    primary = PROJECT_ROOT / "LLM_Prompt_for_Invention_Explanation_Full_JP.md"
     fallback = PROJECT_ROOT / "sample.md"
     path = primary if primary.exists() else fallback
     try:
@@ -252,6 +264,22 @@ def new_idea_form():
                 st.error(f"⚠️ {error_msg}")
                 st.info("基本的な骨格を生成しました。後で再生成を試してください。")
             idea.draft_spec_markdown = spec_result
+            save_ideas(st.session_state.ideas)
+
+            # Also generate Invention Description (発明説明書)
+            status.update(label="発明説明書（フル）を生成中…", state="running")
+            inv_manual_md = _load_invention_instruction_markdown()
+            inv_text, inv_err = generate_invention_description(
+                inv_manual_md,
+                title,
+                idea.description,
+                transcript=idea.messages,
+                attachments=attachment_dicts,
+                gemini_files=gemini_files,
+            )
+            if inv_err:
+                st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
+            idea.invention_description_markdown = inv_text
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
@@ -577,6 +605,20 @@ def _render_pending_questions(
                     idea.draft_spec_markdown = spec_result
                     idea.draft_version += 1
 
+                # Regenerate Invention Description in parallel
+                inv_text, inv_err = generate_invention_description(
+                    _load_invention_instruction_markdown(),
+                    idea.title,
+                    idea.description,
+                    transcript=idea.messages,
+                    attachments=attachment_dicts,
+                    gemini_files=gemini_files,
+                )
+                if inv_err:
+                    st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
+                else:
+                    idea.invention_description_markdown = inv_text
+
                 # Check if this should be the final version based on completeness only
                 is_complete, score = check_spec_completeness(
                     manual_md, idea.draft_spec_markdown, idea.draft_version
@@ -643,6 +685,7 @@ def _render_pending_questions(
 
 def hearing_ui(idea: Idea):
     manual_md = _load_instruction_markdown()
+    inv_manual_md = _load_invention_instruction_markdown()
 
     # File upload section for hearing
     with st.expander("追加ファイルをアップロード", expanded=False):
@@ -715,6 +758,23 @@ def hearing_ui(idea: Idea):
             idea.draft_spec_markdown = spec_result
             save_ideas(st.session_state.ideas)
 
+    # Ensure invention description exists
+    if not idea.invention_description_markdown:
+        with st.spinner("発明説明書（フル）を初期生成中…"):
+            attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
+            inv_text, inv_err = generate_invention_description(
+                inv_manual_md,
+                idea.title,
+                idea.description,
+                transcript=idea.messages,
+                attachments=attachment_dicts,
+                gemini_files=gemini_files,
+            )
+            if inv_err:
+                st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
+            idea.invention_description_markdown = inv_text
+            save_ideas(st.session_state.ideas)
+
     # Auto-generate initial questions if none exist yet (up to 10)
     if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
@@ -775,6 +835,30 @@ def hearing_ui(idea: Idea):
             type="primary",
         )
 
+        # Invention Description (Full) preview and export
+        st.markdown("---")
+        st.subheader("発明説明書（フルバージョン）")
+        with st.expander("プレビュー", expanded=False):
+            st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+        c3, c4 = st.columns(2)
+        inv_title = f"{idea.title}_発明説明書"
+        name_docx2, data_docx2 = export_docx(inv_title, idea.invention_description_markdown)
+        c3.download_button(
+            "📝 発明説明書をWordでダウンロード",
+            data=data_docx2,
+            file_name=name_docx2,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+        name_pdf2, data_pdf2 = export_pdf(inv_title, idea.invention_description_markdown)
+        c4.download_button(
+            "📄 発明説明書をPDFでダウンロード",
+            data=data_pdf2,
+            file_name=name_pdf2,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
             # Properly pair questions and answers considering batch format
@@ -817,6 +901,10 @@ def hearing_ui(idea: Idea):
         with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
             st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
+        # Invention Description (initial draft)
+        with st.expander("発明説明書（ドラフト）", expanded=False):
+            st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+
     else:
         # Version 2-4: New layout - questions first, then history, then draft
         st.subheader("AI ヒアリング")
@@ -848,6 +936,29 @@ def hearing_ui(idea: Idea):
                 "PDF を保存",
                 data=data_pdf,
                 file_name=name_pdf,
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
+        # Invention Description (draft) expander for non-final versions
+        with st.expander("発明説明書（ドラフト）", expanded=False):
+            st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+            st.markdown("---")
+            c3, c4 = st.columns(2)
+            inv_title2 = f"{idea.title}_発明説明書"
+            name_docx2, data_docx2 = export_docx(inv_title2, idea.invention_description_markdown)
+            c3.download_button(
+                "発明説明書をWordで保存",
+                data=data_docx2,
+                file_name=name_docx2,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+            name_pdf2, data_pdf2 = export_pdf(inv_title2, idea.invention_description_markdown)
+            c4.download_button(
+                "発明説明書をPDFで保存",
+                data=data_pdf2,
+                file_name=name_pdf2,
                 mime="application/pdf",
                 use_container_width=True,
             )

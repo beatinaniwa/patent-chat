@@ -30,6 +30,8 @@ class Idea:
     messages: List[Dict[str, str]] = field(default_factory=list)
     # Draft specification text (Markdown)
     draft_spec_markdown: str = ""
+    # Invention description (発明説明書 フルバージョン) Markdown
+    invention_description_markdown: str = ""
     # Draft version counter (1 = 初版)
     draft_version: int = 1
     # Whether this specification is finalized
