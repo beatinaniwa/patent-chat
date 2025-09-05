@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
-from .state import Idea
+from .state import Idea, Revision
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 IDEAS_PATH = DATA_DIR / "ideas.json"
@@ -38,6 +38,19 @@ def load_ideas() -> List[Idea]:
 
             converted_attachments.append(Attachment(**attachment_dict))
         obj["attachments"] = converted_attachments
+
+        # Convert revisions if present
+        revisions = obj.get("revisions") or []
+        converted_revisions = []
+        for rev in revisions:
+            # created_at may be string
+            if isinstance(rev.get("created_at"), str):
+                try:
+                    rev["created_at"] = datetime.fromisoformat(rev["created_at"])  # type: ignore[index]
+                except Exception:
+                    pass
+            converted_revisions.append(Revision(**rev))
+        obj["revisions"] = converted_revisions
         ideas.append(Idea(**obj))
     return ideas
 
