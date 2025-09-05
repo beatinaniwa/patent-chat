@@ -101,6 +101,27 @@ def init_session_state() -> None:
         st.session_state.ideas = load_ideas()
 
 
+def _estimate_completeness_percent(idea: Idea) -> int:
+    """Return an integer 0-100 representing current completeness.
+
+    Prefers stored LLM score when available; otherwise uses a simple heuristic
+    based on placeholders and draft length.
+    """
+    try:
+        if getattr(idea, "completeness_score", 0.0):
+            return int(max(0.0, min(100.0, round(idea.completeness_score))))
+        text = idea.draft_spec_markdown or ""
+        has_placeholders = "未記載" in text
+        spec_length = len(text)
+        if not has_placeholders and spec_length > 3000:
+            score = min(100.0, 70.0 + (spec_length - 3000) / 100.0)
+        else:
+            score = 50.0 if has_placeholders else 60.0
+        return int(score)
+    except Exception:
+        return 0
+
+
 def sidebar_ui():
     ideas: List[Idea] = st.session_state.ideas
     state: AppState = st.session_state.app_state
@@ -448,6 +469,10 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
     hearing_round = idea.draft_version
 
     st.subheader(f"AI ヒアリング（第{hearing_round}回）")
+    # Progress indicator (informational)
+    progress = _estimate_completeness_percent(idea)
+    st.caption("完成度（目標 85% 以上で完了）")
+    st.progress(progress)
 
     # Collect consecutive assistant messages at the tail (unanswered)
     tail_assistant: list[str] = []
@@ -567,6 +592,7 @@ def _render_pending_questions(
                 normalized.append(q)
             else:
                 normalized.append((q, "yesno"))
+        st.caption(f"未回答の質問: {len(normalized)}件")
         # Calculate the starting question number based on all previous questions
         start_num = _calculate_question_start_number(idea)
         for i, (q, q_type) in enumerate(normalized, start=start_num):
@@ -627,6 +653,11 @@ def _render_pending_questions(
                     f"DEBUG: Completeness check - is_complete={is_complete}, "
                     f"score={score}, version={idea.draft_version}"
                 )
+                # Store latest score for UI progress
+                try:
+                    idea.completeness_score = float(score)
+                except Exception:
+                    pass
                 if is_complete:
                     idea.is_final = True
                     print(f"DEBUG: Set is_final=True due to completeness score={score}")
@@ -800,8 +831,8 @@ def hearing_ui(idea: Idea):
     if idea.is_final:
         # Invention Description first (primary deliverable)
         st.subheader("発明説明書（フルバージョン）")
-        with st.expander("プレビュー", expanded=False):
-            st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+        st.success("✅ 発明説明書が完成しました。以下が最終版の内容です。")
+        st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
         c3, c4 = st.columns(2)
         inv_title = f"{idea.title}_発明説明書"
         name_docx2, data_docx2 = export_docx(inv_title, idea.invention_description_markdown)

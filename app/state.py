@@ -38,6 +38,8 @@ class Idea:
     is_final: bool = False
     # Attached files
     attachments: List[Attachment] = field(default_factory=list)
+    # Latest completeness score (0-100), informational only
+    completeness_score: float = 0.0
 
 
 @dataclass
