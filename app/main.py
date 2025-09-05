@@ -798,45 +798,7 @@ def hearing_ui(idea: Idea):
 
     # Handle final version display
     if idea.is_final:
-        version_label = f"第{idea.draft_version}版（最終版）"
-        st.subheader(f"特許明細書 - {version_label}")
-        st.info("✅ 明細書が完成しました。以下から編集・ダウンロードが可能です。")
-
-        # Show full draft expanded for final version
-        st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-
-        # Edit and export options
-        with st.expander("明細書を編集"):
-            edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=500)
-            if st.button("編集内容を保存"):
-                idea.draft_spec_markdown = edited
-                save_ideas(st.session_state.ideas)
-                st.success("保存しました。")
-
-        # Export buttons
-        st.markdown("### エクスポート")
-        c1, c2 = st.columns(2)
-        name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
-        c1.download_button(
-            "📝 Word でダウンロード",
-            data=data_docx,
-            file_name=name_docx,
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-            type="primary",
-        )
-        name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
-        c2.download_button(
-            "📄 PDF でダウンロード",
-            data=data_pdf,
-            file_name=name_pdf,
-            mime="application/pdf",
-            use_container_width=True,
-            type="primary",
-        )
-
-        # Invention Description (Full) preview and export
-        st.markdown("---")
+        # Invention Description first (primary deliverable)
         st.subheader("発明説明書（フルバージョン）")
         with st.expander("プレビュー", expanded=False):
             st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
@@ -858,6 +820,35 @@ def hearing_ui(idea: Idea):
             mime="application/pdf",
             use_container_width=True,
         )
+
+        # Reference: patent specification draft (not a submission)
+        st.markdown("---")
+        with st.expander("生成された明細書ドラフト（参考）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+            with st.expander("明細書ドラフトを編集"):
+                edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=500)
+                if st.button("編集内容を保存"):
+                    idea.draft_spec_markdown = edited
+                    save_ideas(st.session_state.ideas)
+                    st.success("保存しました。")
+            st.markdown("### エクスポート（参考）")
+            c1, c2 = st.columns(2)
+            name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
+            c1.download_button(
+                "📝 Word でダウンロード",
+                data=data_docx,
+                file_name=name_docx,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+            name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
+            c2.download_button(
+                "📄 PDF でダウンロード",
+                data=data_pdf,
+                file_name=name_pdf,
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
@@ -897,13 +888,13 @@ def hearing_ui(idea: Idea):
         # Version 1: Questions first layout
         _render_hearing_section(idea, manual_md, show_questions_first=False)
 
-        # Draft in collapsed expander
-        with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
-            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-
-        # Invention Description (initial draft)
+        # Invention Description (initial draft) first
         with st.expander("発明説明書（ドラフト）", expanded=False):
             st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+
+        # Draft in collapsed expander (keep v1 label for tests)
+        with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
     else:
         # Version 2-4: New layout - questions first, then history, then draft
@@ -914,33 +905,7 @@ def hearing_ui(idea: Idea):
 
         st.divider()
 
-        # Draft at bottom (collapsed)
-        version_label = f"第{idea.draft_version}版"
-        with st.expander(f"生成された明細書ドラフト（{version_label}）", expanded=False):
-            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-
-            # Limited export for non-final versions
-            st.markdown("---")
-            st.caption("※ ドラフトのエクスポート（現在の状態）")
-            c1, c2 = st.columns(2)
-            name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
-            c1.download_button(
-                "Word を保存",
-                data=data_docx,
-                file_name=name_docx,
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
-            name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
-            c2.download_button(
-                "PDF を保存",
-                data=data_pdf,
-                file_name=name_pdf,
-                mime="application/pdf",
-                use_container_width=True,
-            )
-
-        # Invention Description (draft) expander for non-final versions
+        # Invention Description (draft) expander for non-final versions first
         with st.expander("発明説明書（ドラフト）", expanded=False):
             st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
             st.markdown("---")
@@ -959,6 +924,29 @@ def hearing_ui(idea: Idea):
                 "発明説明書をPDFで保存",
                 data=data_pdf2,
                 file_name=name_pdf2,
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
+        # Draft expander after invention description (reference)
+        with st.expander("生成された明細書ドラフト（参考）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+            st.markdown("---")
+            st.caption("※ ドラフトのエクスポート（現在の状態）")
+            c1, c2 = st.columns(2)
+            name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
+            c1.download_button(
+                "Word を保存",
+                data=data_docx,
+                file_name=name_docx,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+            name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
+            c2.download_button(
+                "PDF を保存",
+                data=data_pdf,
+                file_name=name_pdf,
                 mime="application/pdf",
                 use_container_width=True,
             )
