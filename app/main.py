@@ -1111,12 +1111,12 @@ def hearing_ui(idea: Idea):
         # Draft in collapsed expander (keep v1 label for tests)
         with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
             st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-        # Show refine UI only after the invention description is reasonably complete
-        if _is_invention_description_complete(idea.invention_description_markdown):
+        # Show refine UI only after the specification is finalized
+        if idea.is_final:
             st.divider()
             _render_refine_ui(idea)
         else:
-            st.info("発明説明書が未完成のため、修正機能は完成後にご利用ください。")
+            st.info("明細書が完成した後に修正機能をご利用いただけます。")
 
     else:
         # Version 2-4: New layout - questions first, then history, then draft
@@ -1172,11 +1172,11 @@ def hearing_ui(idea: Idea):
                 mime="application/pdf",
                 use_container_width=True,
             )
-        if _is_invention_description_complete(idea.invention_description_markdown):
+        if idea.is_final:
             st.divider()
             _render_refine_ui(idea)
         else:
-            st.info("発明説明書が未完成のため、修正機能は完成後にご利用ください。")
+            st.info("明細書が完成した後に修正機能をご利用いただけます。")
 
 
 def main():
