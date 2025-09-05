@@ -23,6 +23,7 @@ from app.llm import (
     DEFAULT_MODEL_NAME,
     bootstrap_spec,
     check_spec_completeness,
+    generate_invention_description,
     generate_title,
     next_questions,
     regenerate_spec,
@@ -42,6 +43,17 @@ logging.getLogger("pypdf").setLevel(logging.ERROR)
 def _load_instruction_markdown() -> str:
     """Load drafting instruction document with fallback to sample.md."""
     primary = PROJECT_ROOT / "LLM_Prompt_for_Patent_Application_Drafting_from_Idea.md"
+    fallback = PROJECT_ROOT / "sample.md"
+    path = primary if primary.exists() else fallback
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _load_invention_instruction_markdown() -> str:
+    """Load invention description instruction document with fallback to sample.md."""
+    primary = PROJECT_ROOT / "LLM_Prompt_for_Invention_Explanation_Full_JP.md"
     fallback = PROJECT_ROOT / "sample.md"
     path = primary if primary.exists() else fallback
     try:
@@ -87,6 +99,27 @@ def init_session_state() -> None:
         os.environ["GEMINI_MODEL"] = default_model
     if "ideas" not in st.session_state:
         st.session_state.ideas = load_ideas()
+
+
+def _estimate_completeness_percent(idea: Idea) -> int:
+    """Return an integer 0-100 representing current completeness.
+
+    Prefers stored LLM score when available; otherwise uses a simple heuristic
+    based on placeholders and draft length.
+    """
+    try:
+        if getattr(idea, "completeness_score", 0.0):
+            return int(max(0.0, min(100.0, round(idea.completeness_score))))
+        text = idea.draft_spec_markdown or ""
+        has_placeholders = "未記載" in text
+        spec_length = len(text)
+        if not has_placeholders and spec_length > 3000:
+            score = min(100.0, 70.0 + (spec_length - 3000) / 100.0)
+        else:
+            score = 50.0 if has_placeholders else 60.0
+        return int(score)
+    except Exception:
+        return 0
 
 
 def sidebar_ui():
@@ -252,6 +285,22 @@ def new_idea_form():
                 st.error(f"⚠️ {error_msg}")
                 st.info("基本的な骨格を生成しました。後で再生成を試してください。")
             idea.draft_spec_markdown = spec_result
+            save_ideas(st.session_state.ideas)
+
+            # Also generate Invention Description (発明説明書)
+            status.update(label="発明説明書（フル）を生成中…", state="running")
+            inv_manual_md = _load_invention_instruction_markdown()
+            inv_text, inv_err = generate_invention_description(
+                inv_manual_md,
+                title,
+                idea.description,
+                transcript=idea.messages,
+                attachments=attachment_dicts,
+                gemini_files=gemini_files,
+            )
+            if inv_err:
+                st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
+            idea.invention_description_markdown = inv_text
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
@@ -420,6 +469,10 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
     hearing_round = idea.draft_version
 
     st.subheader(f"AI ヒアリング（第{hearing_round}回）")
+    # Progress indicator (informational)
+    progress = _estimate_completeness_percent(idea)
+    st.caption("完成度（目標 85% 以上で完了）")
+    st.progress(progress)
 
     # Collect consecutive assistant messages at the tail (unanswered)
     tail_assistant: list[str] = []
@@ -539,6 +592,7 @@ def _render_pending_questions(
                 normalized.append(q)
             else:
                 normalized.append((q, "yesno"))
+        st.caption(f"未回答の質問: {len(normalized)}件")
         # Calculate the starting question number based on all previous questions
         start_num = _calculate_question_start_number(idea)
         for i, (q, q_type) in enumerate(normalized, start=start_num):
@@ -577,6 +631,20 @@ def _render_pending_questions(
                     idea.draft_spec_markdown = spec_result
                     idea.draft_version += 1
 
+                # Regenerate Invention Description in parallel
+                inv_text, inv_err = generate_invention_description(
+                    _load_invention_instruction_markdown(),
+                    idea.title,
+                    idea.description,
+                    transcript=idea.messages,
+                    attachments=attachment_dicts,
+                    gemini_files=gemini_files,
+                )
+                if inv_err:
+                    st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
+                else:
+                    idea.invention_description_markdown = inv_text
+
                 # Check if this should be the final version based on completeness only
                 is_complete, score = check_spec_completeness(
                     manual_md, idea.draft_spec_markdown, idea.draft_version
@@ -585,6 +653,11 @@ def _render_pending_questions(
                     f"DEBUG: Completeness check - is_complete={is_complete}, "
                     f"score={score}, version={idea.draft_version}"
                 )
+                # Store latest score for UI progress
+                try:
+                    idea.completeness_score = float(score)
+                except Exception:
+                    pass
                 if is_complete:
                     idea.is_final = True
                     print(f"DEBUG: Set is_final=True due to completeness score={score}")
@@ -643,6 +716,7 @@ def _render_pending_questions(
 
 def hearing_ui(idea: Idea):
     manual_md = _load_instruction_markdown()
+    inv_manual_md = _load_invention_instruction_markdown()
 
     # File upload section for hearing
     with st.expander("追加ファイルをアップロード", expanded=False):
@@ -715,6 +789,23 @@ def hearing_ui(idea: Idea):
             idea.draft_spec_markdown = spec_result
             save_ideas(st.session_state.ideas)
 
+    # Ensure invention description exists
+    if not idea.invention_description_markdown:
+        with st.spinner("発明説明書（フル）を初期生成中…"):
+            attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
+            inv_text, inv_err = generate_invention_description(
+                inv_manual_md,
+                idea.title,
+                idea.description,
+                transcript=idea.messages,
+                attachments=attachment_dicts,
+                gemini_files=gemini_files,
+            )
+            if inv_err:
+                st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
+            idea.invention_description_markdown = inv_text
+            save_ideas(st.session_state.ideas)
+
     # Auto-generate initial questions if none exist yet (up to 10)
     if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
@@ -738,42 +829,57 @@ def hearing_ui(idea: Idea):
 
     # Handle final version display
     if idea.is_final:
-        version_label = f"第{idea.draft_version}版（最終版）"
-        st.subheader(f"特許明細書 - {version_label}")
-        st.info("✅ 明細書が完成しました。以下から編集・ダウンロードが可能です。")
-
-        # Show full draft expanded for final version
-        st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-
-        # Edit and export options
-        with st.expander("明細書を編集"):
-            edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=500)
-            if st.button("編集内容を保存"):
-                idea.draft_spec_markdown = edited
-                save_ideas(st.session_state.ideas)
-                st.success("保存しました。")
-
-        # Export buttons
-        st.markdown("### エクスポート")
-        c1, c2 = st.columns(2)
-        name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
-        c1.download_button(
-            "📝 Word でダウンロード",
-            data=data_docx,
-            file_name=name_docx,
+        # Invention Description first (primary deliverable)
+        st.subheader("発明説明書（フルバージョン）")
+        st.success("✅ 発明説明書が完成しました。以下が最終版の内容です。")
+        st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+        c3, c4 = st.columns(2)
+        inv_title = f"{idea.title}_発明説明書"
+        name_docx2, data_docx2 = export_docx(inv_title, idea.invention_description_markdown)
+        c3.download_button(
+            "📝 発明説明書をWordでダウンロード",
+            data=data_docx2,
+            file_name=name_docx2,
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True,
-            type="primary",
         )
-        name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
-        c2.download_button(
-            "📄 PDF でダウンロード",
-            data=data_pdf,
-            file_name=name_pdf,
+        name_pdf2, data_pdf2 = export_pdf(inv_title, idea.invention_description_markdown)
+        c4.download_button(
+            "📄 発明説明書をPDFでダウンロード",
+            data=data_pdf2,
+            file_name=name_pdf2,
             mime="application/pdf",
             use_container_width=True,
-            type="primary",
         )
+
+        # Reference: patent specification draft (not a submission)
+        st.markdown("---")
+        with st.expander("生成された明細書ドラフト（参考）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+            with st.expander("明細書ドラフトを編集"):
+                edited = st.text_area("Markdown", value=idea.draft_spec_markdown, height=500)
+                if st.button("編集内容を保存"):
+                    idea.draft_spec_markdown = edited
+                    save_ideas(st.session_state.ideas)
+                    st.success("保存しました。")
+            st.markdown("### エクスポート（参考）")
+            c1, c2 = st.columns(2)
+            name_docx, data_docx = export_docx(idea.title, idea.draft_spec_markdown)
+            c1.download_button(
+                "📝 Word でダウンロード",
+                data=data_docx,
+                file_name=name_docx,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+            name_pdf, data_pdf = export_pdf(idea.title, idea.draft_spec_markdown)
+            c2.download_button(
+                "📄 PDF でダウンロード",
+                data=data_pdf,
+                file_name=name_pdf,
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
@@ -813,7 +919,11 @@ def hearing_ui(idea: Idea):
         # Version 1: Questions first layout
         _render_hearing_section(idea, manual_md, show_questions_first=False)
 
-        # Draft in collapsed expander
+        # Invention Description (initial draft) first
+        with st.expander("発明説明書（ドラフト）", expanded=False):
+            st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+
+        # Draft in collapsed expander (keep v1 label for tests)
         with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
             st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
 
@@ -826,12 +936,32 @@ def hearing_ui(idea: Idea):
 
         st.divider()
 
-        # Draft at bottom (collapsed)
-        version_label = f"第{idea.draft_version}版"
-        with st.expander(f"生成された明細書ドラフト（{version_label}）", expanded=False):
-            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+        # Invention Description (draft) expander for non-final versions first
+        with st.expander("発明説明書（ドラフト）", expanded=False):
+            st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+            st.markdown("---")
+            c3, c4 = st.columns(2)
+            inv_title2 = f"{idea.title}_発明説明書"
+            name_docx2, data_docx2 = export_docx(inv_title2, idea.invention_description_markdown)
+            c3.download_button(
+                "発明説明書をWordで保存",
+                data=data_docx2,
+                file_name=name_docx2,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+            name_pdf2, data_pdf2 = export_pdf(inv_title2, idea.invention_description_markdown)
+            c4.download_button(
+                "発明説明書をPDFで保存",
+                data=data_pdf2,
+                file_name=name_pdf2,
+                mime="application/pdf",
+                use_container_width=True,
+            )
 
-            # Limited export for non-final versions
+        # Draft expander after invention description (reference)
+        with st.expander("生成された明細書ドラフト（参考）", expanded=False):
+            st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
             st.markdown("---")
             st.caption("※ ドラフトのエクスポート（現在の状態）")
             c1, c2 = st.columns(2)

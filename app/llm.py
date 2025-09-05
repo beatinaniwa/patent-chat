@@ -736,13 +736,11 @@ def check_spec_completeness(
         tuple: (is_complete, score) where is_complete is True if ready to finalize,
                and score is a completeness percentage (0-100)
     """
-    # For earlier versions, check quality
     client = _get_client()
     if client is None:
-        # If no client, use simple heuristics
+        # Simple heuristic when API is unavailable
         has_placeholders = "未記載" in current_spec_md
         spec_length = len(current_spec_md)
-        # Simple scoring: no placeholders and reasonable length
         if not has_placeholders and spec_length > 3000:
             score = min(100, 70 + (spec_length - 3000) / 100)
             return score >= 85, score
@@ -780,7 +778,7 @@ def check_spec_completeness(
         text = (resp.text or "").strip()
 
         # Extract numeric score safely
-        m = re.search(r'\d+(?:\.\d+)?', text)
+        m = re.search(r"\d+(?:\.\d+)?", text)
         if m:
             try:
                 score = float(m.group())
@@ -792,16 +790,160 @@ def check_spec_completeness(
             logger.warning("check_spec_completeness: Could not parse score, using default")
             score = 70.0
 
-        # Consider complete if score >= 85
         is_complete = score >= 85
         return is_complete, score
 
     except Exception:
         logger.exception("check_spec_completeness: API error, using fallback")
-        # Fallback: check for placeholders and length
         has_placeholders = "未記載" in current_spec_md
         spec_length = len(current_spec_md)
         if not has_placeholders and spec_length > 3000:
             score = min(100, 70 + (spec_length - 3000) / 100)
             return score >= 85, score
         return False, 50.0 if has_placeholders else 60.0
+
+
+def generate_invention_description(
+    instruction_md: str,
+    invention_title: str,
+    idea_description: str,
+    transcript: List[Dict[str, str]] | None = None,
+    attachments: Optional[List[Dict]] = None,
+    gemini_files: Optional[List] = None,
+) -> Tuple[str, Optional[str]]:
+    """
+    Generate a full-format Invention Description (発明説明書) based on the provided
+    instruction Markdown, idea description, transcript (Q&A), and attachments.
+
+    Returns Markdown text and optional user-friendly error message.
+    """
+    client = _get_client()
+
+    # Build Q&A section (optional)
+    qa_section = "（質疑応答なし）"
+    if transcript:
+        questions: List[str] = []
+        answers: List[str] = []
+        i = 0
+        while i < len(transcript):
+            q_batch: List[str] = []
+            while i < len(transcript) and transcript[i].get("role") == "assistant":
+                q_batch.append(transcript[i]["content"])
+                i += 1
+            a_batch: List[str] = []
+            while i < len(transcript) and transcript[i].get("role") == "user":
+                a_batch.append(transcript[i]["content"])
+                i += 1
+            questions.extend(q_batch)
+            for j in range(len(q_batch)):
+                answers.append(a_batch[j] if j < len(a_batch) else "未回答")
+        pairs = [f"Q: {q}\nA: {a}" for q, a in zip(questions, answers)]
+        qa_section = "\n\n".join(pairs) if pairs else qa_section
+
+    # Format attachments (optional)
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+
+    # System guidance matches the instruction's role
+    system = (
+        "あなたは企業の知財部に所属する熟練の弁理士です。"
+        "与えられた『発明説明書（フルバージョン）生成』の指示を最優先で参照し、"
+        "入力情報・アイデア概要・質疑応答・添付資料を総合して、発明説明書を作成してください。"
+    )
+
+    # Build the input information section as requested by the prompt
+    input_info = (
+        "**# 入力情報**\n"
+        f"* **発明の名称案:** `{invention_title or '（未設定）'}`\n"
+        f"* **この発明が解決したい課題（背景）:** 未記載（以下の概要・Q&Aから適宜補完）\n"
+        f"* **基本的な解決手段（発明のコアアイデア）:** {idea_description.strip() or '未記載'}\n"
+        f"* **想定される利用者や適用分野:** 未記載（以下の情報から推定可）\n"
+        f"* **その他特記事項（あれば）:** 未記載（添付・Q&A参照）\n"
+    )
+
+    # Compose the full prompt
+    prompt = (
+        f"[発明説明書作成のための指示]\n{instruction_md}\n\n"
+        f"{input_info}\n\n"
+        f"[アイデアの詳細説明]\n{idea_description}\n\n"
+        f"[ヒアリングQ&A]\n{qa_section}\n"
+        f"{attachments_section}"
+        "[出力要件]\n"
+        "- 指示の章立て（0〜5）に従い、Markdownで出力\n"
+        "- 前置きや挨拶は不要（本文のみ）\n"
+        "- 情報が不足する箇所は '未記載' または '（要確認）' と明記\n"
+    )
+
+    # If no client, return a simple skeleton
+    if client is None:
+        logger.warning("generate_invention_description: No client; using fallback skeleton.")
+        return _fallback_invention_skeleton(invention_title, idea_description), (
+            "APIクライアントの初期化に失敗しました。APIキーの設定を確認してください"
+        )
+
+    model_name = _model_name()
+    logger.info(
+        (
+            "generate_invention_description: model=%s, instr_len=%d, idea_len=%d, "
+            "qa_len=%d, files=%d"
+        ),
+        model_name,
+        len(instruction_md or ""),
+        len(idea_description or ""),
+        len(qa_section or ""),
+        len(gemini_files or []),
+    )
+
+    contents_text = f"{system}\n\n{prompt}"
+
+    try:
+        if gemini_files:
+            contents: List[Any] = []
+            for f in gemini_files:
+                if isinstance(f, str) or hasattr(f, "name"):
+                    contents.append(f)
+            contents.append(contents_text)
+            resp = client.models.generate_content(model=model_name, contents=contents)
+        else:
+            resp = client.models.generate_content(model=model_name, contents=contents_text)
+        _log_response_debug("generate_invention_description", resp)
+        text = _clean_llm_spec_text((resp.text or "").strip())
+        if not text:
+            logger.error("generate_invention_description: empty response; using fallback.")
+            return _fallback_invention_skeleton(invention_title, idea_description), (
+                "APIから空の応答を受け取りました。再試行してください"
+            )
+        return text, None
+    except Exception as e:
+        logger.exception("generate_invention_description: API error; using fallback.")
+        return (
+            _fallback_invention_skeleton(invention_title, idea_description),
+            _classify_api_error(e),
+        )
+
+
+def _fallback_invention_skeleton(title: str, idea_description: str) -> str:
+    lines = []
+    lines.append("# 発明説明書（ドラフト）")
+    if title:
+        lines.append("")
+        lines.append(f"> 発明の名称案: {title}")
+    if idea_description.strip():
+        first = idea_description.strip().splitlines()[0][:100]
+        lines.append(f"> アイデア概要: {first}")
+    sections = [
+        "0.【発明の名称}",
+        "1.【発明が解決しようとする課題}",
+        "2.【課題を解決するための手段}",
+        "3.【発明の効果}",
+        "4.【発明を実施するための形態】（実施例）",
+        "5.【請求項】",
+    ]
+    for s in sections:
+        lines.append("")
+        lines.append(f"## {s}")
+        lines.append("未記載")
+    return "\n".join(lines)
