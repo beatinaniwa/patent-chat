@@ -63,7 +63,12 @@ def _load_invention_instruction_markdown() -> str:
 
 
 def _clean_ai_message(content: str) -> str:
-    """AIメッセージから導入部分を除外して本文のみ返す."""
+    """AIメッセージから導入部分を除外して本文のみ返す.
+
+    目的:
+    - LLMが付けがちな前置き文を削る
+    - 箇条書きの番号等は変更しない（他所で利用する可能性があるため）
+    """
     if not content:
         return ""
 
@@ -80,9 +85,9 @@ def _clean_ai_message(content: str) -> str:
         r'^追加で確認.*?。\s*',
     ]
 
-    cleaned = content.strip()
+    cleaned = (content or "").strip()
 
-    # 各パターンで導入部分を除去
+    # 導入部分を除去
     for pattern in intro_patterns:
         cleaned = re.sub(pattern, '', cleaned, flags=re.MULTILINE | re.DOTALL)
 
@@ -90,6 +95,34 @@ def _clean_ai_message(content: str) -> str:
     cleaned = re.sub(r'^\s*\n+', '', cleaned)
 
     return cleaned.strip()
+
+
+def _strip_leading_list_marker(text: str) -> str:
+    """先頭の箇条書き・番号付けマーカーを1回だけ除去するユーティリティ.
+
+    例:
+    - "1. 質問?" → "質問?"
+    - "（1） 質問?" → "質問?"
+    - "Q1: 質問?" → "質問?"
+    - "- 質問?" → "質問?"
+    """
+    if not text:
+        return ""
+    patterns = [
+        r'^\s*[\-・•]\s+',
+        r'^\s*[\u2460-\u2473\u24F5-\u24FE\u2776-\u277F]\s+',
+        r'^\s*[（(]\s*[0-9０-９]{1,3}\s*[）)]\s*',
+        r'^\s*[0-9０-９]{1,3}[\.．、]\s+',
+        r'^\s*[0-9０-９]{1,3}[)）]\s+',
+        r'^\s*(?:Q|Ｑ|問)\s*[0-9０-９]{1,3}[:：\.．]?\s+',
+    ]
+    cleaned = text
+    for p in patterns:
+        new_cleaned = re.sub(p, '', cleaned)
+        if new_cleaned != cleaned:
+            cleaned = new_cleaned
+            break
+    return cleaned
 
 
 def init_session_state() -> None:
@@ -596,7 +629,7 @@ def _render_pending_questions(
         # Calculate the starting question number based on all previous questions
         start_num = _calculate_question_start_number(idea)
         for i, (q, q_type) in enumerate(normalized, start=start_num):
-            cleaned_q = _clean_ai_message(q)
+            cleaned_q = _strip_leading_list_marker(_clean_ai_message(q))
             st.markdown(f"Q{i}: {cleaned_q}")
             key = f"ans-{idea.id}-v{idea.draft_version}-{i}"
             if q_type == "yesno":
