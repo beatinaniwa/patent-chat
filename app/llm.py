@@ -300,7 +300,7 @@ def next_questions(
             "課題解決手段は過不足なく記載されていますか？（はい/いいえ）",
             "図面の参照番号は一貫していますか？（はい/いいえ）",
             "この発明の想定される応用例は何ですか？（自由記述）",
-            "特に強調したい技術的効果はありますか？（自由記述）",
+            "特に強調したい技術的効果は何ですか？（自由記述）",
         ][:num_questions], error_msg
 
     transcript_str = "\n".join([f"{m['role']}: {m['content']}" for m in transcript][-20:])
@@ -326,7 +326,9 @@ def next_questions(
         "- 質問のみを出力（前置きや挨拶は不要）\n"
         "- 各行1問、{num}問\n"
         "- 最初の8問は『はい/いいえ』で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
-        "- 最後の2問は自由記述形式（末尾に'（自由記述）'と付記し、回答は任意）\n"
+        "- 最後の2問は自由記述形式（末尾に'（自由記述）'）で、"
+        "『〜ありますか？』や『〜ですか？』などの二択誘導を避け、"
+        "『どのような』『なぜ』『何』『具体例を挙げて』等の表現を用いる\n"
         "- 1つの質問につき1論点、具体的に\n"
         "- 既に回答済みの重複質問は避ける\n"
         "- 添付ファイルの内容も考慮する\n".replace("{num}", str(num_questions))
@@ -338,7 +340,9 @@ def next_questions(
         "- 質問のみを出力（前置きや挨拶は不要）\n"
         "- 各行1問、{num}問\n"
         "- 最初の8問は『はい/いいえ』で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
-        "- 最後の2問は自由記述形式（末尾に'（自由記述）'と付記し、回答は任意）\n"
+        "- 最後の2問は自由記述形式（末尾に'（自由記述）'）で、"
+        "『〜ありますか？』や『〜ですか？』などの二択誘導を避け、"
+        "『どのような』『なぜ』『何』『具体例を挙げて』等の表現を用いる\n"
         "- 1つの質問につき1論点、具体的に\n"
         "- 既に回答済みの重複質問は避ける\n".replace("{num}", str(num_questions))
     )
@@ -373,11 +377,58 @@ def next_questions(
             "従来技術との差異は明確ですか？（はい/いいえ）",
             "発明の効果は再現可能ですか？（はい/いいえ）",
             "実施形態の各段階は網羅されていますか？（はい/いいえ）",
-            "他に記載しておくべき関連技術はありますか？（自由記述）",
-            "今後の改良案や展望はありますか？（自由記述）",
+            "他に記載しておくべき関連技術は何ですか？（自由記述）",
+            "今後の改良案や展望はどのようなものですか？（自由記述）",
         ][:num_questions], error_msg
     lines = [line.strip("- ") for line in text.splitlines() if line.strip()]
-    return [line for line in lines if line][:num_questions], None
+
+    # Enforce 8 yes/no + 2 open when requesting 10 questions
+    # Open questions: mark with '（自由記述）' and ensure they don't include 'はい/いいえ'
+    # Yes/No questions: ensure they include '（はい/いいえ）'
+    def _normalize_yesno_marker(s: str) -> str:
+        # Remove any existing open marker
+        s = re.sub(r"（自由記述）$", "", s).strip()
+        # If already contains yes/no hint, leave as-is; otherwise append
+        if ("はい/いいえ" not in s) and ("（はい/いいえ" not in s):
+            s = f"{s}（はい/いいえ）"
+        return s
+
+    def _normalize_open_marker(s: str) -> str:
+        # Remove yes/no markers anywhere if bracketed
+        s = re.sub(r"（はい/いいえ[^）]*）", "", s).strip()
+        # Avoid duplicated open marker
+        if not s.endswith("（自由記述）"):
+            s = f"{s}（自由記述）"
+        return s
+
+    lines = [line for line in lines if line][:num_questions]
+
+    # If fewer than requested, pad with canonical prompts
+    if len(lines) < num_questions:
+        pad_pool = [
+            "図面の参照番号は一貫していますか？（はい/いいえ）",
+            "実施例は複数のバリエーションがありますか？（はい/いいえ）",
+            "競合技術との差異は明確ですか？（はい/いいえ）",
+            "この発明の想定される応用例は何ですか？（自由記述）",
+            "特に強調したい技術的効果はありますか？（自由記述）",
+        ]
+        for p in pad_pool:
+            if len(lines) >= num_questions:
+                break
+            lines.append(p)
+
+    if num_questions >= 10 and len(lines) >= num_questions:
+        # First num_questions-2 as yes/no, last 2 as open
+        cutoff = num_questions - 2
+        adjusted: List[str] = []
+        for idx, q in enumerate(lines[:num_questions]):
+            if idx < cutoff:
+                adjusted.append(_normalize_yesno_marker(q))
+            else:
+                adjusted.append(_normalize_open_marker(q))
+        lines = adjusted
+
+    return lines, None
 
 
 def refine_spec(

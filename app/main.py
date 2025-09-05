@@ -434,7 +434,11 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
         if not text:
             return False
         t = str(text).strip()
-        return t.endswith("？") or t.endswith("?") or "はい/いいえ" in t
+        # Consider as question if it:
+        # - ends with a question mark, or
+        # - is yes/no style, or
+        # - is marked as open-ended (自由記述)
+        return t.endswith("？") or t.endswith("?") or ("はい/いいえ" in t) or ("自由記述" in t)
 
     def _looks_like_yes_no_question(text: str) -> bool:
         if not text:
@@ -619,7 +623,7 @@ def _render_pending_questions(
                             "図面の参照番号は適切ですか？（はい/いいえ）",
                             "効果の裏付けデータはありますか？（はい/いいえ）",
                             "この発明の想定される応用例は何ですか？（自由記述）",
-                            "特に強調したい技術的効果はありますか？（自由記述）",
+                            "特に強調したい技術的効果は何ですか？（自由記述）",
                         ][:10]
                         q_error = "予期しないエラー"
 
