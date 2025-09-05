@@ -128,6 +128,21 @@ def _strip_leading_list_marker(text: str) -> str:
     return cleaned
 
 
+def _is_invention_description_complete(text: str) -> bool:
+    """Heuristic to decide if invention description is 'complete enough'.
+
+    - Must be non-empty and not just placeholders
+    - No '未記載' placeholders present
+    - Length threshold to avoid showing refine on skeletons
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if "未記載" in t:
+        return False
+    return len(t) >= 300
+
+
 def init_session_state() -> None:
     if "app_state" not in st.session_state:
         default_model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME)
@@ -1096,8 +1111,12 @@ def hearing_ui(idea: Idea):
         # Draft in collapsed expander (keep v1 label for tests)
         with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
             st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
-        st.divider()
-        _render_refine_ui(idea)
+        # Show refine UI only after the invention description is reasonably complete
+        if _is_invention_description_complete(idea.invention_description_markdown):
+            st.divider()
+            _render_refine_ui(idea)
+        else:
+            st.info("発明説明書が未完成のため、修正機能は完成後にご利用ください。")
 
     else:
         # Version 2-4: New layout - questions first, then history, then draft
@@ -1153,8 +1172,11 @@ def hearing_ui(idea: Idea):
                 mime="application/pdf",
                 use_container_width=True,
             )
-        st.divider()
-        _render_refine_ui(idea)
+        if _is_invention_description_complete(idea.invention_description_markdown):
+            st.divider()
+            _render_refine_ui(idea)
+        else:
+            st.info("発明説明書が未完成のため、修正機能は完成後にご利用ください。")
 
 
 def main():
