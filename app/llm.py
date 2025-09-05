@@ -6,7 +6,10 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from google import genai
+try:
+    from google import genai
+except ModuleNotFoundError:  # pragma: no cover
+    genai = None  # type: ignore
 
 from app.file_handler import _format_attachments_for_prompt
 
@@ -81,12 +84,12 @@ def _title_model_name() -> str:
     return "gemini-2.5-flash"
 
 
-def _get_client() -> Optional[genai.Client]:
+def _get_client() -> Optional[Any]:
     api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if genai is None or not api_key:
+        logger.warning("Gemini API key is not set (GOOGLE_API_KEY or GEMINI_API_KEY).")
+        return None
     try:
-        if not api_key:
-            logger.warning("Gemini API key is not set (GOOGLE_API_KEY or GEMINI_API_KEY).")
-            return None
         return genai.Client(api_key=api_key)
     except Exception:
         logger.exception("Failed to initialize Gemini client.")
@@ -291,13 +294,20 @@ def next_questions(
             "現行ドラフトに未記載箇所があります。図面は必要ですか？（はい/いいえ）",
             "実施例は複数のバリエーションがありますか？（はい/いいえ）",
             "発明の効果に定量的根拠はありますか？（はい/いいえ）",
+            "競合技術との差異は明確ですか？（はい/いいえ）",
+            "用語の定義は十分ですか？（はい/いいえ）",
+            "各構成要件の関係は明確ですか？（はい/いいえ）",
+            "課題解決手段は過不足なく記載されていますか？（はい/いいえ）",
+            "図面の参照番号は一貫していますか？（はい/いいえ）",
+            "この発明の想定される応用例は何ですか？（自由記述）",
+            "特に強調したい技術的効果はありますか？（自由記述）",
         ][:num_questions], error_msg
 
     transcript_str = "\n".join([f"{m['role']}: {m['content']}" for m in transcript][-20:])
     system = (
         "あなたは特許明細書の執筆アシスタントです。以下の指示書に照らして、"
         "現行ドラフトの不足・曖昧・未記載部分を見つけ、ユーザーが答えやすい"
-        "『はい/いいえ』のクローズド質問を優先度順に作成してください。"
+        "質問を優先度順に作成してください。"
     )
 
     # Format attachments if provided
@@ -315,7 +325,8 @@ def next_questions(
         "[出力要件]\n"
         "- 質問のみを出力（前置きや挨拶は不要）\n"
         "- 各行1問、{num}問\n"
-        "- はい/いいえ で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
+        "- 最初の8問は『はい/いいえ』で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
+        "- 最後の2問は自由記述形式（末尾に'（自由記述）'と付記し、回答は任意）\n"
         "- 1つの質問につき1論点、具体的に\n"
         "- 既に回答済みの重複質問は避ける\n"
         "- 添付ファイルの内容も考慮する\n".replace("{num}", str(num_questions))
@@ -326,7 +337,8 @@ def next_questions(
         "[出力要件]\n"
         "- 質問のみを出力（前置きや挨拶は不要）\n"
         "- 各行1問、{num}問\n"
-        "- はい/いいえ で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
+        "- 最初の8問は『はい/いいえ』で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
+        "- 最後の2問は自由記述形式（末尾に'（自由記述）'と付記し、回答は任意）\n"
         "- 1つの質問につき1論点、具体的に\n"
         "- 既に回答済みの重複質問は避ける\n".replace("{num}", str(num_questions))
     )
@@ -356,6 +368,13 @@ def next_questions(
             "課題の技術的背景は十分に記載されていますか？（はい/いいえ）",
             "構成要件の必須/任意が明確ですか？（はい/いいえ）",
             "変形例はありますか？（はい/いいえ）",
+            "図面と説明との整合性は取れていますか？（はい/いいえ）",
+            "請求項の範囲は適切ですか？（はい/いいえ）",
+            "従来技術との差異は明確ですか？（はい/いいえ）",
+            "発明の効果は再現可能ですか？（はい/いいえ）",
+            "実施形態の各段階は網羅されていますか？（はい/いいえ）",
+            "他に記載しておくべき関連技術はありますか？（自由記述）",
+            "今後の改良案や展望はありますか？（自由記述）",
         ][:num_questions], error_msg
     lines = [line.strip("- ") for line in text.splitlines() if line.strip()]
     return [line for line in lines if line][:num_questions], None

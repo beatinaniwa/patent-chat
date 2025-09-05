@@ -259,7 +259,7 @@ def new_idea_form():
                 manual_md,
                 idea.messages,
                 idea.draft_spec_markdown,
-                num_questions=5,
+                num_questions=10,
                 version=idea.draft_version,
                 is_final=idea.is_final,
                 attachments=attachment_dicts,
@@ -430,31 +430,33 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
             break
     tail_assistant = list(reversed(tail_assistant))
 
-    # Heuristic: keep only yes/no style questions for the radio form
+    def _looks_like_question(text: str) -> bool:
+        if not text:
+            return False
+        t = str(text).strip()
+        return t.endswith("？") or t.endswith("?") or "はい/いいえ" in t
+
     def _looks_like_yes_no_question(text: str) -> bool:
         if not text:
             return False
         t = str(text).strip()
-        if "はい/いいえ" in t or "（はい/いいえ" in t:
-            return True
-        if t.endswith("？") or t.endswith("?"):
-            return True
-        return False
+        return "はい/いいえ" in t or "（はい/いいえ" in t
 
-    pending_candidates = [q for q in tail_assistant if _looks_like_yes_no_question(q)]
+    pending_candidates = [q for q in tail_assistant if _looks_like_question(q)]
     # De-duplicate while preserving order
     seen_q: set[str] = set()
-    pending_questions: list[str] = []
+    pending_questions: list[tuple[str, str]] = []
     for q in pending_candidates:
         if q not in seen_q:
             seen_q.add(q)
-            pending_questions.append(q)
-    pending_questions = pending_questions[:5]
+            q_type = "yesno" if _looks_like_yes_no_question(q) else "open"
+            pending_questions.append((q, q_type))
+    pending_questions = pending_questions[:10]
 
     # Determine which trailing assistant messages to hide from the history
     # (exactly those shown in the pending questions)
     to_hide_indices = set()
-    match_from_end = list(reversed(pending_questions))
+    match_from_end = list(reversed([q for q, _ in pending_questions]))
     ptr = 0
     for idx in range(len(idea.messages) - 1, -1, -1):
         if ptr >= len(match_from_end):
@@ -519,25 +521,38 @@ def _render_hearing_section(idea: Idea, manual_md: str, show_questions_first: bo
         _render_pending_questions(idea, pending_questions, manual_md)
 
 
-def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_md: str):
+def _render_pending_questions(
+    idea: Idea, pending_questions: list[tuple[str, str]] | list[str], manual_md: str
+):
     """Render pending questions form."""
-    st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」）")
+    st.markdown("**未回答の質問**（各項目に回答して「回答をまとめて送信」。自由記述は任意）")
     with st.form(f"qa-form-{idea.id}"):
         selections: list[str] = []
+        # Normalize input to list of tuples
+        normalized: list[tuple[str, str]] = []
+        for q in pending_questions:
+            if isinstance(q, tuple):
+                normalized.append(q)
+            else:
+                normalized.append((q, "yesno"))
         # Calculate the starting question number based on all previous questions
         start_num = _calculate_question_start_number(idea)
-        for i, q in enumerate(pending_questions, start=start_num):
+        for i, (q, q_type) in enumerate(normalized, start=start_num):
             cleaned_q = _clean_ai_message(q)
             st.markdown(f"Q{i}: {cleaned_q}")
-            # Use draft version in key to ensure fresh state for each round
-            choice = st.radio(
-                key=f"ans-{idea.id}-v{idea.draft_version}-{i}",
-                label="回答",
-                options=["はい", "いいえ", "わからない"],
-                index=2,  # Default to "わからない"
-                horizontal=True,
-            )
-            selections.append(choice)
+            key = f"ans-{idea.id}-v{idea.draft_version}-{i}"
+            if q_type == "yesno":
+                choice = st.radio(
+                    key=key,
+                    label="回答",
+                    options=["はい", "いいえ", "わからない"],
+                    index=2,  # Default to "わからない"
+                    horizontal=True,
+                )
+                selections.append(choice)
+            else:
+                text = st.text_area(key=key, label="回答（任意）", value="")
+                selections.append(text.strip() or "無回答")
         submitted = st.form_submit_button("回答をまとめて送信", type="primary")
         if submitted:
             for ans in selections:
@@ -581,7 +596,7 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                             manual_md,
                             idea.messages,
                             idea.draft_spec_markdown,
-                            num_questions=5,
+                            num_questions=10,
                             version=idea.draft_version,
                             is_final=idea.is_final,
                             attachments=attachment_dicts,
@@ -599,8 +614,13 @@ def _render_pending_questions(idea: Idea, pending_questions: list[str], manual_m
                             "実施例は複数のバリエーションがありますか？（はい/いいえ）",
                             "発明の効果に定量的根拠はありますか？（はい/いいえ）",
                             "既存技術との違いを明確に説明できますか？（はい/いいえ）",
-                            "この発明の最も重要な利点は何ですか？（はい/いいえで答えられる形で確認）",
-                        ][:5]
+                            "この発明の最も重要な利点は何ですか？（はい/いいえ）",
+                            "追加の実施形態は存在しますか？（はい/いいえ）",
+                            "図面の参照番号は適切ですか？（はい/いいえ）",
+                            "効果の裏付けデータはありますか？（はい/いいえ）",
+                            "この発明の想定される応用例は何ですか？（自由記述）",
+                            "特に強調したい技術的効果はありますか？（自由記述）",
+                        ][:10]
                         q_error = "予期しないエラー"
 
                     print(f"DEBUG: Generated {len(qs2)} questions for version {idea.draft_version}")
@@ -691,7 +711,7 @@ def hearing_ui(idea: Idea):
             idea.draft_spec_markdown = spec_result
             save_ideas(st.session_state.ideas)
 
-    # Auto-generate initial questions if none exist yet (up to 5)
+    # Auto-generate initial questions if none exist yet (up to 10)
     if not any(m.get("role") == "assistant" for m in idea.messages) and not idea.is_final:
         with st.spinner("初回質問を準備中…"):
             attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
@@ -699,7 +719,7 @@ def hearing_ui(idea: Idea):
                 manual_md,
                 idea.messages,
                 idea.draft_spec_markdown,
-                num_questions=5,
+                num_questions=10,
                 version=idea.draft_version,
                 is_final=idea.is_final,
                 attachments=attachment_dicts,
