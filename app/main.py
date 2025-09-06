@@ -224,13 +224,13 @@ def sidebar_ui():
         state.gemini_model = selected_model
         os.environ["GEMINI_MODEL"] = selected_model
 
-    # Move the idea list title below the model selector
-    st.sidebar.title("アイデア一覧")
-
-    # Prompt editor entry
+    # Prompt editor entry (show above idea list)
     if st.sidebar.button("📝 プロンプト編集", use_container_width=True):
         state.show_prompt_editor = True
         st.rerun()
+
+    # Move the idea list title below the prompt editor button
+    st.sidebar.title("アイデア一覧")
 
     # New idea button
     if st.sidebar.button("＋ 新規アイデアを作成", use_container_width=True):
