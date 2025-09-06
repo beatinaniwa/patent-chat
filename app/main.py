@@ -773,7 +773,7 @@ def _render_refine_ui(idea: Idea) -> None:
             placeholder=("例: 第2章の課題を具体化し、効果では根拠を明記。請求項は文末表現を統一。"),
             height=120,
         )
-        st.caption("対象: 発明説明書（採用時に明細書ドラフトも自動同期）")
+        st.caption("対象: 発明説明書（必要に応じて明細書ドラフトも同期可能）")
         submitted = st.form_submit_button("プレビュー作成", type="primary")
 
     if submitted:
@@ -830,6 +830,10 @@ def _render_refine_ui(idea: Idea) -> None:
             use_container_width=True,
         )
 
+        # Option: also sync specification draft when adopting
+        sync_key = f"refine_sync_spec_{idea.id}"
+        st.checkbox("明細書ドラフトも同期更新する", value=False, key=sync_key)
+
         cols2 = st.columns(2)
         col_a = cols2[0]
         col_b = cols2[1]
@@ -859,38 +863,42 @@ def _render_refine_ui(idea: Idea) -> None:
                     },
                 )
                 add_revision(idea, rev, max_history=50)
-                # Auto-sync spec draft to match the updated explanation
-                manual_md = _load_instruction_markdown()
-                old_spec = idea.draft_spec_markdown
-                with st.status("明細書ドラフトを同期更新中…", expanded=False):
-                    new_spec, spec_err = update_spec_from_invention(
-                        manual_md, idea.invention_description_markdown, old_spec
-                    )
-                if spec_err:
-                    st.warning(f"⚠️ 明細書ドラフトの同期で問題が発生しました: {spec_err}")
-                else:
-                    idea.draft_spec_markdown = new_spec
-                    # Record spec revision history as well
-                    spec_diff = unified_markdown_diff(
-                        old_spec, new_spec, fromfile="before_spec", tofile="after_spec"
-                    )
-                    spec_rev = Revision(
-                        id=str(_uuid.uuid4()),
-                        doc_type="spec",
-                        feedback="Auto-sync with explanation refine",
-                        text=new_spec,
-                        diff=spec_diff,
-                        model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME),
-                        meta={
-                            "sync": "from explanation",
-                            "from": f"{len((old_spec or ''))} chars",
-                            "to": f"{len((new_spec or ''))} chars",
-                        },
-                    )
-                    add_revision(idea, spec_rev, max_history=50)
+                # Optional: sync spec draft if user opted in
+                if st.session_state.get(sync_key):
+                    manual_md = _load_instruction_markdown()
+                    old_spec = idea.draft_spec_markdown
+                    with st.status("明細書ドラフトを同期更新中…", expanded=False):
+                        new_spec, spec_err = update_spec_from_invention(
+                            manual_md, idea.invention_description_markdown, old_spec
+                        )
+                    if spec_err:
+                        st.warning(f"⚠️ 明細書ドラフトの同期で問題が発生しました: {spec_err}")
+                    else:
+                        idea.draft_spec_markdown = new_spec
+                        # Record spec revision history as well
+                        spec_diff = unified_markdown_diff(
+                            old_spec, new_spec, fromfile="before_spec", tofile="after_spec"
+                        )
+                        spec_rev = Revision(
+                            id=str(_uuid.uuid4()),
+                            doc_type="spec",
+                            feedback="Sync with explanation refine (opt-in)",
+                            text=new_spec,
+                            diff=spec_diff,
+                            model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME),
+                            meta={
+                                "sync": "from explanation",
+                                "from": f"{len((old_spec or ''))} chars",
+                                "to": f"{len((new_spec or ''))} chars",
+                            },
+                        )
+                        add_revision(idea, spec_rev, max_history=50)
 
                 save_ideas(st.session_state.ideas)
-                st.success("修正を保存し、明細書ドラフトを同期しました。")
+                if st.session_state.get(sync_key):
+                    st.success("修正を保存し、明細書ドラフトも同期しました。")
+                else:
+                    st.success("修正を保存しました（明細書ドラフトの同期は未実施）。")
                 # Clear preview
                 st.session_state.pop(f"refine_preview_{idea.id}", None)
                 st.rerun()
