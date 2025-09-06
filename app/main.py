@@ -742,8 +742,10 @@ def _render_pending_questions(
                 append_user_answer(idea.messages, ans)
             with st.spinner("ドラフト更新中…"):
                 attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
+                # Use the latest session-reflected prompts at submit time
+                current_spec_prompt = _get_current_spec_instruction()
                 spec_result, error_msg = regenerate_spec(
-                    manual_md,
+                    current_spec_prompt,
                     idea.description,
                     idea.messages,
                     attachments=attachment_dicts,
@@ -756,12 +758,16 @@ def _render_pending_questions(
                     idea.draft_spec_markdown = spec_result
                     idea.draft_version += 1
                     idea.spec_prompt_used = build_regenerate_spec_prompt_text(
-                        manual_md, idea.description, idea.messages, attachments=attachment_dicts
+                        current_spec_prompt,
+                        idea.description,
+                        idea.messages,
+                        attachments=attachment_dicts,
                     )
 
                 # Regenerate Invention Description in parallel
+                current_inv_prompt = _get_current_invention_instruction()
                 inv_text, inv_err = generate_invention_description(
-                    _load_invention_instruction_markdown(),
+                    current_inv_prompt,
                     idea.title,
                     idea.description,
                     transcript=idea.messages,
@@ -773,7 +779,7 @@ def _render_pending_questions(
                 else:
                     idea.invention_description_markdown = inv_text
                     idea.invention_prompt_used = build_invention_description_prompt_text(
-                        _load_invention_instruction_markdown(),
+                        current_inv_prompt,
                         idea.title,
                         idea.description,
                         transcript=idea.messages,
