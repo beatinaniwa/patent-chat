@@ -1116,7 +1116,7 @@ def hearing_ui(idea: Idea):
             st.divider()
             _render_refine_ui(idea)
         else:
-            st.info("明細書が完成した後に修正機能をご利用いただけます。")
+            st.info("特許説明書が完成した後に修正機能をご利用いただけます。")
 
     else:
         # Version 2-4: New layout - questions first, then history, then draft
@@ -1176,7 +1176,7 @@ def hearing_ui(idea: Idea):
             st.divider()
             _render_refine_ui(idea)
         else:
-            st.info("明細書が完成した後に修正機能をご利用いただけます。")
+            st.info("特許説明書が完成した後に修正機能をご利用いただけます。")
 
 
 def main():
