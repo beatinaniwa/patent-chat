@@ -1277,13 +1277,11 @@ def prompt_editor_ui():
             key="inv_prompt_editor_text",
             height=360,
         )
-        btns2 = st.columns(3)
+        btns2 = st.columns(2)
         if btns2[0].button("セッションに反映", key="apply_inv"):
             state.custom_invention_prompt = inv_val
             st.success("セッションのカスタムプロンプトを更新しました。")
-        if btns2[1].button("MDをダウンロード", key="save_inv"):
-            pass
-        if btns2[2].button("初期化（リポジトリ版に戻す）", key="reset_inv"):
+        if btns2[1].button("初期化（リポジトリ版に戻す）", key="reset_inv"):
             # Defer setting widget state until next rerun
             st.session_state["inv_prompt_reset_to"] = default_inv_md
             state.custom_invention_prompt = ""
@@ -1300,102 +1298,19 @@ def prompt_editor_ui():
             key="spec_prompt_editor_text",
             height=360,
         )
-        btns = st.columns(3)
+        btns = st.columns(2)
         if btns[0].button("セッションに反映"):
             state.custom_spec_prompt = spec_val
             st.success("セッションのカスタムプロンプトを更新しました。")
-        # Cloud: no server-side persistence. Offer MD download instead.
-        if btns[1].button("MDをダウンロード"):
-            # no-op; use the download buttons below for actual export
-            pass
-        if btns[2].button("初期化（リポジトリ版に戻す）"):
+        if btns[1].button("初期化（リポジトリ版に戻す）"):
             st.session_state["spec_prompt_reset_to"] = default_spec_md
             state.custom_spec_prompt = ""
             st.rerun()
-
-        # Execute with selected idea
-        idea_id = state.selected_idea_id
-        st.markdown("---")
-        st.markdown("#### このプロンプトで実行")
-        disabled = not idea_id
-        col_x, col_y = st.columns(2)
-        if col_x.button("このプロンプトで発明説明書を再生成", disabled=disabled, type="primary"):
-            idea = get_idea(st.session_state.ideas, cast(str, idea_id)) if idea_id else None
-            if idea:
-                with st.status("再生成中…", expanded=False):
-                    try:
-                        attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
-                        new_text, err = generate_invention_description(
-                            inv_val,
-                            idea.title,
-                            idea.description,
-                            transcript=idea.messages,
-                            attachments=attachment_dicts,
-                            gemini_files=gemini_files,
-                        )
-                        if err:
-                            st.warning(f"⚠️ 再生成で問題が発生しました: {err}")
-                        idea.invention_description_markdown = new_text
-                        save_ideas(st.session_state.ideas)
-                        st.success("発明説明書を更新しました。")
-                    except Exception as e:
-                        st.error(f"エラー: {e}")
-        if col_y.button("戻る"):
-            state.show_prompt_editor = False
-            st.rerun()
-
-    # Import/Export controls (session-only)
-    import json
-
+    # 画面を閉じる
     st.markdown("---")
-    st.markdown("### インポート / エクスポート（セッション用）")
-    cexp1, cexp2, cexp3, cexp4 = st.columns(4)
-    # Combined JSON download of both prompts (current editor values)
-    combined = {
-        "spec_instruction_md": st.session_state.get(
-            "spec_prompt_editor_text", state.custom_spec_prompt
-        ),
-        "invention_instruction_md": st.session_state.get(
-            "inv_prompt_editor_text", state.custom_invention_prompt
-        ),
-    }
-    json_bytes = json.dumps(combined, ensure_ascii=False, indent=2).encode("utf-8")
-    cexp1.download_button(
-        label="JSONをダウンロード",
-        data=json_bytes,
-        file_name="prompt_overrides.json",
-        mime="application/json",
-        use_container_width=True,
-    )
-    # Per-tab MD quick downloads
-    cexp2.download_button(
-        label="Spec MDをDL",
-        data=(st.session_state.get("spec_prompt_editor_text") or "").encode("utf-8"),
-        file_name="spec_prompt.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
-    cexp3.download_button(
-        label="Invention MDをDL",
-        data=(st.session_state.get("inv_prompt_editor_text") or "").encode("utf-8"),
-        file_name="invention_prompt.md",
-        mime="text/markdown",
-        use_container_width=True,
-    )
-    uploaded = cexp4.file_uploader("JSONを読み込み", type=["json"], label_visibility="collapsed")
-    if uploaded is not None:
-        try:
-            data = json.loads(uploaded.read().decode("utf-8"))
-            spec_md = data.get("spec_instruction_md") or ""
-            inv_md = data.get("invention_instruction_md") or ""
-            # Defer widget content updates to next rerun
-            st.session_state["spec_prompt_reset_to"] = spec_md
-            st.session_state["inv_prompt_reset_to"] = inv_md
-            state.custom_spec_prompt = spec_md
-            state.custom_invention_prompt = inv_md
-            st.rerun()
-        except Exception as e:
-            st.error(f"JSON読み込みに失敗しました: {e}")
+    if st.button("戻る"):
+        state.show_prompt_editor = False
+        st.rerun()
 
 
 def main():
