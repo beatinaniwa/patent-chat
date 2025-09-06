@@ -69,8 +69,16 @@ class AppState:
     selected_idea_id: Optional[str] = None
     # UI: new idea form visibility
     show_new_idea_form: bool = False
+    # UI: prompt editor visibility
+    show_prompt_editor: bool = False
     # Selected Gemini model (e.g., gemini-2.5-pro or gemini-2.5-flash)
     gemini_model: str = DEFAULT_MODEL_NAME
+
+    # Custom prompt overrides (session-level)
+    use_custom_spec_prompt: bool = False
+    custom_spec_prompt: str = ""
+    use_custom_invention_prompt: bool = False
+    custom_invention_prompt: str = ""
 
     def to_dict(self) -> Dict:
         return asdict(self)

@@ -33,7 +33,12 @@ from app.llm import (
 )
 from app.spec_builder import add_revision, append_assistant_message, append_user_answer
 from app.state import AppState, Attachment, Idea, Revision
-from app.storage import delete_idea, get_idea, load_ideas, save_ideas
+from app.storage import (
+    delete_idea,
+    get_idea,
+    load_ideas,
+    save_ideas,
+)
 
 APP_TITLE = "Patent Chat"
 DEFAULT_CATEGORY = "防災"
@@ -63,6 +68,31 @@ def _load_invention_instruction_markdown() -> str:
         return path.read_text(encoding="utf-8")
     except Exception:
         return ""
+
+
+def _get_current_spec_instruction() -> str:
+    """Return the currently active instruction for spec drafting.
+
+    Prefers session-level custom prompt when enabled; otherwise loads from file.
+    """
+    state: AppState = st.session_state.app_state
+    if getattr(state, "use_custom_spec_prompt", False) and state.custom_spec_prompt.strip():
+        return state.custom_spec_prompt
+    return _load_instruction_markdown()
+
+
+def _get_current_invention_instruction() -> str:
+    """Return the currently active instruction for invention description.
+
+    Prefers session-level custom prompt when enabled; otherwise loads from file.
+    """
+    state: AppState = st.session_state.app_state
+    if (
+        getattr(state, "use_custom_invention_prompt", False)
+        and state.custom_invention_prompt.strip()
+    ):
+        return state.custom_invention_prompt
+    return _load_invention_instruction_markdown()
 
 
 def _clean_ai_message(content: str) -> str:
@@ -150,6 +180,7 @@ def init_session_state() -> None:
         os.environ["GEMINI_MODEL"] = default_model
     if "ideas" not in st.session_state:
         st.session_state.ideas = load_ideas()
+    # No persistence for custom prompts on cloud; use session only
 
 
 def _estimate_completeness_percent(idea: Idea) -> int:
@@ -181,6 +212,7 @@ def sidebar_ui():
     if st.sidebar.button("🏠 トップへ戻る", use_container_width=True):
         state.selected_idea_id = None
         state.show_new_idea_form = False
+        state.show_prompt_editor = False
         # Clear transient flags such as hearing start
         if "start_hearing" in st.session_state:
             st.session_state.pop("start_hearing", None)
@@ -197,6 +229,11 @@ def sidebar_ui():
 
     # Move the idea list title below the model selector
     st.sidebar.title("アイデア一覧")
+
+    # Prompt editor entry
+    if st.sidebar.button("📝 プロンプト編集", use_container_width=True):
+        state.show_prompt_editor = True
+        st.rerun()
 
     # New idea button
     if st.sidebar.button("＋ 新規アイデアを作成", use_container_width=True):
@@ -328,7 +365,7 @@ def new_idea_form():
             save_ideas(st.session_state.ideas)
 
             status.update(label="初期ドラフト生成中…", state="running")
-            manual_md = _load_instruction_markdown()
+            manual_md = _get_current_spec_instruction()
             spec_result, error_msg = bootstrap_spec(
                 manual_md, idea.description, attachments=attachment_dicts, gemini_files=gemini_files
             )
@@ -340,7 +377,7 @@ def new_idea_form():
 
             # Also generate Invention Description (発明説明書)
             status.update(label="発明説明書（フル）を生成中…", state="running")
-            inv_manual_md = _load_invention_instruction_markdown()
+            inv_manual_md = _get_current_invention_instruction()
             inv_text, inv_err = generate_invention_description(
                 inv_manual_md,
                 title,
@@ -865,7 +902,7 @@ def _render_refine_ui(idea: Idea) -> None:
                 add_revision(idea, rev, max_history=50)
                 # Optional: sync spec draft if user opted in
                 if st.session_state.get(sync_key):
-                    manual_md = _load_instruction_markdown()
+                    manual_md = _get_current_spec_instruction()
                     old_spec = idea.draft_spec_markdown
                     with st.status("明細書ドラフトを同期更新中…", expanded=False):
                         new_spec, spec_err = update_spec_from_invention(
@@ -908,8 +945,8 @@ def _render_refine_ui(idea: Idea) -> None:
 
 
 def hearing_ui(idea: Idea):
-    manual_md = _load_instruction_markdown()
-    inv_manual_md = _load_invention_instruction_markdown()
+    manual_md = _get_current_spec_instruction()
+    inv_manual_md = _get_current_invention_instruction()
 
     # File upload section for hearing
     with st.expander("追加ファイルをアップロード", expanded=False):
@@ -1191,6 +1228,193 @@ def hearing_ui(idea: Idea):
             st.info("特許説明書が完成した後に修正機能をご利用いただけます。")
 
 
+def prompt_editor_ui():
+    """Render a simple in-app prompt editor and execution panel."""
+    state: AppState = st.session_state.app_state
+    st.header("プロンプト編集と実行")
+    st.caption("明細書ドラフト/発明説明書の指示プロンプトを編集し、適用・保存できます。")
+
+    # Global usage toggles
+    st.markdown("### 使用設定（このセッション）")
+    c1, c2 = st.columns(2)
+    with c1:
+        state.use_custom_spec_prompt = st.toggle(
+            "明細書ドラフトでカスタムプロンプトを使用する",
+            value=state.use_custom_spec_prompt,
+        )
+    with c2:
+        state.use_custom_invention_prompt = st.toggle(
+            "発明説明書でカスタムプロンプトを使用する",
+            value=state.use_custom_invention_prompt,
+        )
+
+    st.divider()
+
+    tab1, tab2 = st.tabs(["明細書ドラフトの指示", "発明説明書の指示"])
+
+    # Spec prompt tab
+    with tab1:
+        default_spec_md = _load_instruction_markdown()
+        current_spec = state.custom_spec_prompt or default_spec_md
+        spec_val = st.text_area(
+            "明細書ドラフト用プロンプト (Markdown)",
+            key="spec_prompt_editor_text",
+            value=current_spec,
+            height=360,
+        )
+        btns = st.columns(3)
+        if btns[0].button("セッションに反映"):
+            state.custom_spec_prompt = spec_val
+            st.success("セッションのカスタムプロンプトを更新しました。")
+        # Cloud: no server-side persistence. Offer MD download instead.
+        if btns[1].button("MDをダウンロード"):
+            # no-op; use the download buttons below for actual export
+            pass
+        if btns[2].button("初期化（リポジトリ版に戻す）"):
+            st.session_state["spec_prompt_editor_text"] = default_spec_md
+            state.custom_spec_prompt = ""
+            st.info("リポジトリのデフォルトに戻しました。")
+
+        # Execute with selected idea
+        idea_id = state.selected_idea_id
+        st.markdown("---")
+        st.markdown("#### このプロンプトで実行")
+        disabled = not idea_id
+        if disabled:
+            st.info("左のアイデア一覧から対象を選択してください。")
+        col_a, col_b = st.columns(2)
+        if col_a.button(
+            "このプロンプトで明細書を再生成（全情報反映）",
+            disabled=disabled,
+            type="primary",
+        ):
+            idea = get_idea(st.session_state.ideas, cast(str, idea_id)) if idea_id else None
+            if idea:
+                with st.status("再生成中…", expanded=False):
+                    try:
+                        attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
+                        # Apply custom prompt regardless of toggle for explicit run
+                        new_spec, err = regenerate_spec(
+                            spec_val,
+                            idea.description,
+                            idea.messages,
+                            attachments=attachment_dicts,
+                            gemini_files=gemini_files,
+                        )
+                        if err:
+                            st.warning(f"⚠️ 再生成で問題が発生しました: {err}")
+                        idea.draft_spec_markdown = new_spec
+                        save_ideas(st.session_state.ideas)
+                        st.success("明細書ドラフトを更新しました。ヒアリング画面で続きが可能です。")
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
+
+    # Invention description prompt tab
+    with tab2:
+        default_inv_md = _load_invention_instruction_markdown()
+        current_inv = state.custom_invention_prompt or default_inv_md
+        inv_val = st.text_area(
+            "発明説明書用プロンプト (Markdown)",
+            key="inv_prompt_editor_text",
+            value=current_inv,
+            height=360,
+        )
+        btns2 = st.columns(3)
+        if btns2[0].button("セッションに反映", key="apply_inv"):
+            state.custom_invention_prompt = inv_val
+            st.success("セッションのカスタムプロンプトを更新しました。")
+        if btns2[1].button("MDをダウンロード", key="save_inv"):
+            pass
+        if btns2[2].button("初期化（リポジトリ版に戻す）", key="reset_inv"):
+            st.session_state["inv_prompt_editor_text"] = default_inv_md
+            state.custom_invention_prompt = ""
+            st.info("リポジトリのデフォルトに戻しました。")
+
+        # Execute with selected idea
+        idea_id = state.selected_idea_id
+        st.markdown("---")
+        st.markdown("#### このプロンプトで実行")
+        disabled = not idea_id
+        col_x, col_y = st.columns(2)
+        if col_x.button("このプロンプトで発明説明書を再生成", disabled=disabled, type="primary"):
+            idea = get_idea(st.session_state.ideas, cast(str, idea_id)) if idea_id else None
+            if idea:
+                with st.status("再生成中…", expanded=False):
+                    try:
+                        attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
+                        new_text, err = generate_invention_description(
+                            inv_val,
+                            idea.title,
+                            idea.description,
+                            transcript=idea.messages,
+                            attachments=attachment_dicts,
+                            gemini_files=gemini_files,
+                        )
+                        if err:
+                            st.warning(f"⚠️ 再生成で問題が発生しました: {err}")
+                        idea.invention_description_markdown = new_text
+                        save_ideas(st.session_state.ideas)
+                        st.success("発明説明書を更新しました。")
+                    except Exception as e:
+                        st.error(f"エラー: {e}")
+        if col_y.button("戻る"):
+            state.show_prompt_editor = False
+            st.rerun()
+
+    # Import/Export controls (session-only)
+    import json
+
+    st.markdown("---")
+    st.markdown("### インポート / エクスポート（セッション用）")
+    cexp1, cexp2, cexp3, cexp4 = st.columns(4)
+    # Combined JSON download of both prompts (current editor values)
+    combined = {
+        "spec_instruction_md": st.session_state.get(
+            "spec_prompt_editor_text", state.custom_spec_prompt
+        ),
+        "invention_instruction_md": st.session_state.get(
+            "inv_prompt_editor_text", state.custom_invention_prompt
+        ),
+    }
+    json_bytes = json.dumps(combined, ensure_ascii=False, indent=2).encode("utf-8")
+    cexp1.download_button(
+        label="JSONをダウンロード",
+        data=json_bytes,
+        file_name="prompt_overrides.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    # Per-tab MD quick downloads
+    cexp2.download_button(
+        label="Spec MDをDL",
+        data=(st.session_state.get("spec_prompt_editor_text") or "").encode("utf-8"),
+        file_name="spec_prompt.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+    cexp3.download_button(
+        label="Invention MDをDL",
+        data=(st.session_state.get("inv_prompt_editor_text") or "").encode("utf-8"),
+        file_name="invention_prompt.md",
+        mime="text/markdown",
+        use_container_width=True,
+    )
+    uploaded = cexp4.file_uploader("JSONを読み込み", type=["json"], label_visibility="collapsed")
+    if uploaded is not None:
+        try:
+            data = json.loads(uploaded.read().decode("utf-8"))
+            spec_md = data.get("spec_instruction_md") or ""
+            inv_md = data.get("invention_instruction_md") or ""
+            st.session_state["spec_prompt_editor_text"] = spec_md
+            st.session_state["inv_prompt_editor_text"] = inv_md
+            state.custom_spec_prompt = spec_md
+            state.custom_invention_prompt = inv_md
+            st.success("JSONを読み込み、セッションに反映しました。")
+            st.rerun()
+        except Exception as e:
+            st.error(f"JSON読み込みに失敗しました: {e}")
+
+
 def main():
     load_dotenv()
     st.set_page_config(page_title=APP_TITLE, layout="wide")
@@ -1210,7 +1434,9 @@ def main():
     state: AppState = st.session_state.app_state
 
     # Main area
-    if state.show_new_idea_form and state.selected_idea_id:
+    if state.show_prompt_editor:
+        prompt_editor_ui()
+    elif state.show_new_idea_form and state.selected_idea_id:
         # edit selected
         idea = get_idea(ideas, state.selected_idea_id)
         if idea:

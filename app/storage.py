@@ -10,6 +10,7 @@ from .state import Idea, Revision
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 IDEAS_PATH = DATA_DIR / "ideas.json"
+PROMPTS_PATH = DATA_DIR / "prompt_overrides.json"
 
 
 def ensure_data_dir() -> None:
@@ -17,6 +18,16 @@ def ensure_data_dir() -> None:
     if not IDEAS_PATH.exists():
         IDEAS_PATH.write_text(
             json.dumps({"ideas": []}, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    # Create prompt overrides file if missing (empty defaults)
+    if not PROMPTS_PATH.exists():
+        PROMPTS_PATH.write_text(
+            json.dumps(
+                {"spec_instruction_md": "", "invention_instruction_md": ""},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
         )
 
 
@@ -70,6 +81,32 @@ def save_ideas(ideas: List[Idea]) -> None:
     IDEAS_PATH.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2, cls=DateTimeEncoder), encoding="utf-8"
     )
+
+
+def load_prompt_overrides() -> dict:
+    """Load prompt overrides persisted in the data directory.
+
+    Returns a dict with keys: spec_instruction_md, invention_instruction_md
+    (empty strings if not set)
+    """
+    ensure_data_dir()
+    try:
+        raw = json.loads(PROMPTS_PATH.read_text(encoding="utf-8"))
+        spec_md = raw.get("spec_instruction_md") or ""
+        inv_md = raw.get("invention_instruction_md") or ""
+        return {"spec_instruction_md": spec_md, "invention_instruction_md": inv_md}
+    except Exception:
+        return {"spec_instruction_md": "", "invention_instruction_md": ""}
+
+
+def save_prompt_overrides(spec_instruction_md: str, invention_instruction_md: str) -> None:
+    """Persist prompt overrides to the data directory."""
+    ensure_data_dir()
+    payload = {
+        "spec_instruction_md": spec_instruction_md or "",
+        "invention_instruction_md": invention_instruction_md or "",
+    }
+    PROMPTS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def get_idea(ideas: List[Idea], idea_id: str) -> Optional[Idea]:
