@@ -265,26 +265,6 @@ def new_idea_form():
         "アイデアの詳細説明", height=160, placeholder="アイデアの概要を記載…"
     )
 
-    # Show which prompts will be used for this creation
-    state: AppState = st.session_state.app_state
-    st.markdown("### 使用するプロンプト（この新規作成）")
-    spec_is_custom = (state.custom_spec_prompt or "").strip() != ""
-    inv_is_custom = (state.custom_invention_prompt or "").strip() != ""
-    spec_label = "セッションのカスタム" if spec_is_custom else "既定（リポジトリ）"
-    inv_label = "セッションのカスタム" if inv_is_custom else "既定（リポジトリ）"
-    st.caption(f"明細書ドラフト用プロンプト: {spec_label}")
-    st.caption(f"発明説明書用プロンプト: {inv_label}")
-    with st.expander("プロンプトの先頭プレビュー", expanded=False):
-        spec_preview = (_get_current_spec_instruction() or "").strip().splitlines()[:6]
-        inv_preview = (_get_current_invention_instruction() or "").strip().splitlines()[:6]
-        st.markdown("**発明説明書（使用予定）**")
-        st.code("\n".join(inv_preview) or "(空)", language="markdown")
-        st.markdown("**明細書ドラフト（使用予定）**")
-        st.code("\n".join(spec_preview) or "(空)", language="markdown")
-    if st.button("プロンプトを編集する"):
-        state.show_prompt_editor = True
-        st.rerun()
-
     # File upload section
     st.markdown("### 関連ファイルの添付（任意）")
     uploaded_files = st.file_uploader(
@@ -303,6 +283,26 @@ def new_idea_form():
                 key=f"comment_{uploaded_file.name}",
             )
             attachments_to_add.append((uploaded_file, comment))
+
+    # Show which prompts will be used (moved below attachments)
+    state: AppState = st.session_state.app_state
+    st.markdown("### 使用するプロンプト（この新規作成）")
+    spec_is_custom = (state.custom_spec_prompt or "").strip() != ""
+    inv_is_custom = (state.custom_invention_prompt or "").strip() != ""
+    spec_label = "セッションのカスタム" if spec_is_custom else "既定（リポジトリ）"
+    inv_label = "セッションのカスタム" if inv_is_custom else "既定（リポジトリ）"
+    st.caption(f"明細書ドラフト用プロンプト: {spec_label}")
+    st.caption(f"発明説明書用プロンプト: {inv_label}")
+    with st.expander("プロンプトの先頭プレビュー", expanded=False):
+        spec_preview = (_get_current_spec_instruction() or "").strip().splitlines()[:6]
+        inv_preview = (_get_current_invention_instruction() or "").strip().splitlines()[:6]
+        st.markdown("**発明説明書（使用予定）**")
+        st.code("\n".join(inv_preview) or "(空)", language="markdown")
+        st.markdown("**明細書ドラフト（使用予定）**")
+        st.code("\n".join(spec_preview) or "(空)", language="markdown")
+    if st.button("プロンプトを編集する"):
+        state.show_prompt_editor = True
+        st.rerun()
 
     cols = st.columns(2)
     if cols[0].button("保存", type="primary"):
