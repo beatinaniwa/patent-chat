@@ -76,7 +76,7 @@ def _get_current_spec_instruction() -> str:
     Prefers session-level custom prompt when enabled; otherwise loads from file.
     """
     state: AppState = st.session_state.app_state
-    if getattr(state, "use_custom_spec_prompt", False) and state.custom_spec_prompt.strip():
+    if state.custom_spec_prompt.strip():
         return state.custom_spec_prompt
     return _load_instruction_markdown()
 
@@ -87,10 +87,7 @@ def _get_current_invention_instruction() -> str:
     Prefers session-level custom prompt when enabled; otherwise loads from file.
     """
     state: AppState = st.session_state.app_state
-    if (
-        getattr(state, "use_custom_invention_prompt", False)
-        and state.custom_invention_prompt.strip()
-    ):
+    if state.custom_invention_prompt.strip():
         return state.custom_invention_prompt
     return _load_invention_instruction_markdown()
 
@@ -267,6 +264,26 @@ def new_idea_form():
     description = st.text_area(
         "アイデアの詳細説明", height=160, placeholder="アイデアの概要を記載…"
     )
+
+    # Show which prompts will be used for this creation
+    state: AppState = st.session_state.app_state
+    st.markdown("### 使用するプロンプト（この新規作成）")
+    spec_is_custom = (state.custom_spec_prompt or "").strip() != ""
+    inv_is_custom = (state.custom_invention_prompt or "").strip() != ""
+    spec_label = "セッションのカスタム" if spec_is_custom else "既定（リポジトリ）"
+    inv_label = "セッションのカスタム" if inv_is_custom else "既定（リポジトリ）"
+    st.caption(f"明細書ドラフト用プロンプト: {spec_label}")
+    st.caption(f"発明説明書用プロンプト: {inv_label}")
+    with st.expander("プロンプトの先頭プレビュー", expanded=False):
+        spec_preview = (_get_current_spec_instruction() or "").strip().splitlines()[:6]
+        inv_preview = (_get_current_invention_instruction() or "").strip().splitlines()[:6]
+        st.markdown("**発明説明書（使用予定）**")
+        st.code("\n".join(inv_preview) or "(空)", language="markdown")
+        st.markdown("**明細書ドラフト（使用予定）**")
+        st.code("\n".join(spec_preview) or "(空)", language="markdown")
+    if st.button("プロンプトを編集する"):
+        state.show_prompt_editor = True
+        st.rerun()
 
     # File upload section
     st.markdown("### 関連ファイルの添付（任意）")
@@ -1234,26 +1251,34 @@ def prompt_editor_ui():
     st.header("プロンプト編集と実行")
     st.caption("明細書ドラフト/発明説明書の指示プロンプトを編集し、適用・保存できます。")
 
-    # Global usage toggles
-    st.markdown("### 使用設定（このセッション）")
-    c1, c2 = st.columns(2)
-    with c1:
-        state.use_custom_spec_prompt = st.toggle(
-            "明細書ドラフトでカスタムプロンプトを使用する",
-            value=state.use_custom_spec_prompt,
-        )
-    with c2:
-        state.use_custom_invention_prompt = st.toggle(
-            "発明説明書でカスタムプロンプトを使用する",
-            value=state.use_custom_invention_prompt,
-        )
-
+    # カスタムプロンプトはセッションに反映されていれば常に使用します
     st.divider()
 
-    tab1, tab2 = st.tabs(["明細書ドラフトの指示", "発明説明書の指示"])
+    tab_inv, tab_spec = st.tabs(["発明説明書の指示", "明細書ドラフトの指示"])
 
-    # Spec prompt tab
-    with tab1:
+    # Invention description prompt tab (first)
+    with tab_inv:
+        default_inv_md = _load_invention_instruction_markdown()
+        current_inv = state.custom_invention_prompt or default_inv_md
+        inv_val = st.text_area(
+            "発明説明書用プロンプト (Markdown)",
+            key="inv_prompt_editor_text",
+            value=current_inv,
+            height=360,
+        )
+        btns2 = st.columns(3)
+        if btns2[0].button("セッションに反映", key="apply_inv"):
+            state.custom_invention_prompt = inv_val
+            st.success("セッションのカスタムプロンプトを更新しました。")
+        if btns2[1].button("MDをダウンロード", key="save_inv"):
+            pass
+        if btns2[2].button("初期化（リポジトリ版に戻す）", key="reset_inv"):
+            st.session_state["inv_prompt_editor_text"] = default_inv_md
+            state.custom_invention_prompt = ""
+            st.info("リポジトリのデフォルトに戻しました。")
+
+    # Spec prompt tab (second)
+    with tab_spec:
         default_spec_md = _load_instruction_markdown()
         current_spec = state.custom_spec_prompt or default_spec_md
         spec_val = st.text_area(
@@ -1273,61 +1298,6 @@ def prompt_editor_ui():
         if btns[2].button("初期化（リポジトリ版に戻す）"):
             st.session_state["spec_prompt_editor_text"] = default_spec_md
             state.custom_spec_prompt = ""
-            st.info("リポジトリのデフォルトに戻しました。")
-
-        # Execute with selected idea
-        idea_id = state.selected_idea_id
-        st.markdown("---")
-        st.markdown("#### このプロンプトで実行")
-        disabled = not idea_id
-        if disabled:
-            st.info("左のアイデア一覧から対象を選択してください。")
-        col_a, col_b = st.columns(2)
-        if col_a.button(
-            "このプロンプトで明細書を再生成（全情報反映）",
-            disabled=disabled,
-            type="primary",
-        ):
-            idea = get_idea(st.session_state.ideas, cast(str, idea_id)) if idea_id else None
-            if idea:
-                with st.status("再生成中…", expanded=False):
-                    try:
-                        attachment_dicts, gemini_files = _prepare_attachment_dicts(idea)
-                        # Apply custom prompt regardless of toggle for explicit run
-                        new_spec, err = regenerate_spec(
-                            spec_val,
-                            idea.description,
-                            idea.messages,
-                            attachments=attachment_dicts,
-                            gemini_files=gemini_files,
-                        )
-                        if err:
-                            st.warning(f"⚠️ 再生成で問題が発生しました: {err}")
-                        idea.draft_spec_markdown = new_spec
-                        save_ideas(st.session_state.ideas)
-                        st.success("明細書ドラフトを更新しました。ヒアリング画面で続きが可能です。")
-                    except Exception as e:
-                        st.error(f"エラー: {e}")
-
-    # Invention description prompt tab
-    with tab2:
-        default_inv_md = _load_invention_instruction_markdown()
-        current_inv = state.custom_invention_prompt or default_inv_md
-        inv_val = st.text_area(
-            "発明説明書用プロンプト (Markdown)",
-            key="inv_prompt_editor_text",
-            value=current_inv,
-            height=360,
-        )
-        btns2 = st.columns(3)
-        if btns2[0].button("セッションに反映", key="apply_inv"):
-            state.custom_invention_prompt = inv_val
-            st.success("セッションのカスタムプロンプトを更新しました。")
-        if btns2[1].button("MDをダウンロード", key="save_inv"):
-            pass
-        if btns2[2].button("初期化（リポジトリ版に戻す）", key="reset_inv"):
-            st.session_state["inv_prompt_editor_text"] = default_inv_md
-            state.custom_invention_prompt = ""
             st.info("リポジトリのデフォルトに戻しました。")
 
         # Execute with selected idea
