@@ -234,8 +234,13 @@ def sidebar_ui():
 
     # New idea button
     if st.sidebar.button("＋ 新規アイデアを作成", use_container_width=True):
-        state.show_new_idea_form = True
-        st.rerun()
+        # If currently in prompt editor, guard navigation with confirmation
+        if state.show_prompt_editor:
+            st.session_state["pending_nav_to"] = "new_idea"
+            st.rerun()
+        else:
+            state.show_new_idea_form = True
+            st.rerun()
 
     # Idea list
     for idea in ideas:
@@ -1261,6 +1266,9 @@ def prompt_editor_ui():
     if spec_reset is not None:
         st.session_state["spec_prompt_editor_text"] = spec_reset
 
+    # If navigation from sidebar is pending, check unsaved changes
+    pending_nav = st.session_state.get("pending_nav_to")
+
     st.divider()
 
     tab_inv, tab_spec = st.tabs(["発明説明書の指示", "明細書ドラフトの指示"])
@@ -1306,6 +1314,45 @@ def prompt_editor_ui():
             st.session_state["spec_prompt_reset_to"] = default_spec_md
             state.custom_spec_prompt = ""
             st.rerun()
+    # Pending navigation handling (after widgets are available)
+    if pending_nav == "new_idea":
+        # Determine if there are unsaved edits
+        default_inv_md = _load_invention_instruction_markdown()
+        default_spec_md = _load_instruction_markdown()
+        inv_text = st.session_state.get("inv_prompt_editor_text", "")
+        spec_text = st.session_state.get("spec_prompt_editor_text", "")
+        inv_applied = state.custom_invention_prompt or default_inv_md
+        spec_applied = state.custom_spec_prompt or default_spec_md
+        has_unsaved = (inv_text.strip() != (inv_applied or "").strip()) or (
+            spec_text.strip() != (spec_applied or "").strip()
+        )
+
+        st.markdown("---")
+        if has_unsaved:
+            st.warning("編集中のプロンプトがセッションに反映されていません。どのように進みますか？")
+            c1, c2, c3 = st.columns(3)
+            if c1.button("セッションに反映して新規作成へ"):
+                state.custom_invention_prompt = inv_text
+                state.custom_spec_prompt = spec_text
+                st.session_state.pop("pending_nav_to", None)
+                state.show_prompt_editor = False
+                state.show_new_idea_form = True
+                st.rerun()
+            if c2.button("破棄して新規作成へ"):
+                st.session_state.pop("pending_nav_to", None)
+                state.show_prompt_editor = False
+                state.show_new_idea_form = True
+                st.rerun()
+            if c3.button("キャンセル"):
+                st.session_state.pop("pending_nav_to", None)
+                st.rerun()
+        else:
+            # No unsaved edits; proceed directly
+            st.session_state.pop("pending_nav_to", None)
+            state.show_prompt_editor = False
+            state.show_new_idea_form = True
+            st.rerun()
+
     # 画面を閉じる
     st.markdown("---")
     if st.button("戻る"):
