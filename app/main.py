@@ -1066,6 +1066,10 @@ def hearing_ui(idea: Idea):
                 use_container_width=True,
             )
 
+        # Allow refinement after completion as requested
+        st.divider()
+        _render_refine_ui(idea)
+
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
             # Properly pair questions and answers considering batch format
