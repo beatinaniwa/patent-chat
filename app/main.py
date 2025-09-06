@@ -17,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.auth import render_login_gate, render_sidebar_user
+from app.diff_utils import unified_markdown_diff
 from app.export import export_docx, export_pdf
 from app.file_handler import process_uploaded_file_with_gemini
 from app.llm import (
@@ -26,10 +27,12 @@ from app.llm import (
     generate_invention_description,
     generate_title,
     next_questions,
+    refine_document,
     regenerate_spec,
+    update_spec_from_invention,
 )
-from app.spec_builder import append_assistant_message, append_user_answer
-from app.state import AppState, Attachment, Idea
+from app.spec_builder import add_revision, append_assistant_message, append_user_answer
+from app.state import AppState, Attachment, Idea, Revision
 from app.storage import delete_idea, get_idea, load_ideas, save_ideas
 
 APP_TITLE = "Patent Chat"
@@ -123,6 +126,21 @@ def _strip_leading_list_marker(text: str) -> str:
             cleaned = new_cleaned
             break
     return cleaned
+
+
+def _is_invention_description_complete(text: str) -> bool:
+    """Heuristic to decide if invention description is 'complete enough'.
+
+    - Must be non-empty and not just placeholders
+    - No '未記載' placeholders present
+    - Length threshold to avoid showing refine on skeletons
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if "未記載" in t:
+        return False
+    return len(t) >= 300
 
 
 def init_session_state() -> None:
@@ -747,6 +765,148 @@ def _render_pending_questions(
             st.rerun()
 
 
+def _render_refine_ui(idea: Idea) -> None:
+    st.subheader("LLM修正（発明説明書のみ対象）")
+    with st.form(f"refine-form-{idea.id}"):
+        feedback = st.text_area(
+            "修正指示を入力",
+            placeholder=("例: 第2章の課題を具体化し、効果では根拠を明記。請求項は文末表現を統一。"),
+            height=120,
+        )
+        st.caption("対象: 発明説明書（必要に応じて明細書ドラフトも同期可能）")
+        submitted = st.form_submit_button("プレビュー作成", type="primary")
+
+    if submitted:
+        doc_type = "explanation"
+        original = idea.invention_description_markdown
+        with st.status("修正案を生成中…", expanded=False):
+            refined, err = refine_document(original, feedback, doc_type=doc_type)
+        if err:
+            st.warning(f"⚠️ 修正生成で問題が発生しました: {err}")
+        diff = unified_markdown_diff(
+            original,
+            refined,
+            fromfile=f"before_{doc_type}",
+            tofile=f"after_{doc_type}",
+        )
+        st.session_state[f"refine_preview_{idea.id}"] = {
+            "doc_type": doc_type,
+            "feedback": feedback,
+            "refined": refined,
+            "diff": diff,
+        }
+
+    preview = st.session_state.get(f"refine_preview_{idea.id}")
+    if preview:
+        st.markdown("---")
+        st.markdown("**修正プレビュー**")
+        cols = st.columns(2)
+        c1 = cols[0]
+        c2 = cols[1]
+        with c1:
+            st.caption("差分（unified）")
+            st.code(preview["diff"] or "(差分なし)", language="diff")
+        with c2:
+            st.caption("修正後の本文（全文）")
+            st.markdown(preview["refined"] or "(出力なし)")
+
+        # Export preview without saving
+        exp_cols = st.columns(2)
+        name_base = f"{idea.title}_発明説明書プレビュー"
+        name_docx_p, data_docx_p = export_docx(name_base, preview["refined"])
+        exp_cols[0].download_button(
+            "プレビューをWordで保存",
+            data=data_docx_p,
+            file_name=name_docx_p,
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+        )
+        name_pdf_p, data_pdf_p = export_pdf(name_base, preview["refined"])
+        exp_cols[1].download_button(
+            "プレビューをPDFで保存",
+            data=data_pdf_p,
+            file_name=name_pdf_p,
+            mime="application/pdf",
+            use_container_width=True,
+        )
+
+        # Option: also sync specification draft when adopting
+        sync_key = f"refine_sync_spec_{idea.id}"
+        st.checkbox("明細書ドラフトも同期更新する", value=False, key=sync_key)
+
+        cols2 = st.columns(2)
+        col_a = cols2[0]
+        col_b = cols2[1]
+        if col_a.button("採用して保存", type="primary"):
+            doc_type = preview["doc_type"]
+            text = preview["refined"]
+            before = idea.invention_description_markdown
+            if not text or text.strip() == (before or "").strip():
+                st.info("内容に変更がありません。")
+            else:
+                # Apply to idea (explanation only)
+                idea.invention_description_markdown = text
+
+                # Record revision
+                import uuid as _uuid
+
+                rev = Revision(
+                    id=str(_uuid.uuid4()),
+                    doc_type=doc_type,
+                    feedback=preview["feedback"],
+                    text=text,
+                    diff=preview["diff"],
+                    model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME),
+                    meta={
+                        "from": f"{len((before or ''))} chars",
+                        "to": f"{len((text or ''))} chars",
+                    },
+                )
+                add_revision(idea, rev, max_history=50)
+                # Optional: sync spec draft if user opted in
+                if st.session_state.get(sync_key):
+                    manual_md = _load_instruction_markdown()
+                    old_spec = idea.draft_spec_markdown
+                    with st.status("明細書ドラフトを同期更新中…", expanded=False):
+                        new_spec, spec_err = update_spec_from_invention(
+                            manual_md, idea.invention_description_markdown, old_spec
+                        )
+                    if spec_err:
+                        st.warning(f"⚠️ 明細書ドラフトの同期で問題が発生しました: {spec_err}")
+                    else:
+                        idea.draft_spec_markdown = new_spec
+                        # Record spec revision history as well
+                        spec_diff = unified_markdown_diff(
+                            old_spec, new_spec, fromfile="before_spec", tofile="after_spec"
+                        )
+                        spec_rev = Revision(
+                            id=str(_uuid.uuid4()),
+                            doc_type="spec",
+                            feedback="Sync with explanation refine (opt-in)",
+                            text=new_spec,
+                            diff=spec_diff,
+                            model=os.getenv("GEMINI_MODEL", DEFAULT_MODEL_NAME),
+                            meta={
+                                "sync": "from explanation",
+                                "from": f"{len((old_spec or ''))} chars",
+                                "to": f"{len((new_spec or ''))} chars",
+                            },
+                        )
+                        add_revision(idea, spec_rev, max_history=50)
+
+                save_ideas(st.session_state.ideas)
+                if st.session_state.get(sync_key):
+                    st.success("修正を保存し、明細書ドラフトも同期しました。")
+                else:
+                    st.success("修正を保存しました（明細書ドラフトの同期は未実施）。")
+                # Clear preview
+                st.session_state.pop(f"refine_preview_{idea.id}", None)
+                st.rerun()
+        if col_b.button("プレビューを破棄"):
+            st.session_state.pop(f"refine_preview_{idea.id}", None)
+            st.rerun()
+
+
 def hearing_ui(idea: Idea):
     manual_md = _load_instruction_markdown()
     inv_manual_md = _load_invention_instruction_markdown()
@@ -914,6 +1074,10 @@ def hearing_ui(idea: Idea):
                 use_container_width=True,
             )
 
+        # Allow refinement after completion as requested
+        st.divider()
+        _render_refine_ui(idea)
+
         # Show Q&A history at the bottom
         with st.expander("質疑応答履歴", expanded=False):
             # Properly pair questions and answers considering batch format
@@ -959,6 +1123,12 @@ def hearing_ui(idea: Idea):
         # Draft in collapsed expander (keep v1 label for tests)
         with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
             st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+        # Show refine UI only after the specification is finalized
+        if idea.is_final:
+            st.divider()
+            _render_refine_ui(idea)
+        else:
+            st.info("特許説明書が完成した後に修正機能をご利用いただけます。")
 
     else:
         # Version 2-4: New layout - questions first, then history, then draft
@@ -1014,6 +1184,11 @@ def hearing_ui(idea: Idea):
                 mime="application/pdf",
                 use_container_width=True,
             )
+        if idea.is_final:
+            st.divider()
+            _render_refine_ui(idea)
+        else:
+            st.info("特許説明書が完成した後に修正機能をご利用いただけます。")
 
 
 def main():

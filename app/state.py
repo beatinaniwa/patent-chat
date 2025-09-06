@@ -21,6 +21,23 @@ class Attachment:
 
 
 @dataclass
+class Revision:
+    """A single LLM-applied refinement to a document.
+
+    Stores the full refined text and metadata for history / export.
+    """
+
+    id: str
+    created_at: datetime = field(default_factory=datetime.now)
+    doc_type: str = "spec"  # "spec" or "explanation"
+    feedback: str = ""
+    text: str = ""
+    diff: str = ""
+    model: Optional[str] = None
+    meta: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class Idea:
     id: str
     title: str
@@ -40,6 +57,10 @@ class Idea:
     attachments: List[Attachment] = field(default_factory=list)
     # Latest completeness score (0-100), informational only
     completeness_score: float = 0.0
+    # Refinement history (latest first)
+    revisions: List[Revision] = field(default_factory=list)
+    # Currently selected revision id (optional)
+    active_revision_id: Optional[str] = None
 
 
 @dataclass
