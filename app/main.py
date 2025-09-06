@@ -23,6 +23,10 @@ from app.file_handler import process_uploaded_file_with_gemini
 from app.llm import (
     DEFAULT_MODEL_NAME,
     bootstrap_spec,
+    build_bootstrap_spec_prompt_text,
+    build_invention_description_prompt_text,
+    build_regenerate_spec_prompt_text,
+    build_update_spec_from_invention_prompt_text,
     check_spec_completeness,
     generate_invention_description,
     generate_title,
@@ -395,6 +399,10 @@ def new_idea_form():
                 st.error(f"⚠️ {error_msg}")
                 st.info("基本的な骨格を生成しました。後で再生成を試してください。")
             idea.draft_spec_markdown = spec_result
+            # Store prompt used for confirmation
+            idea.spec_prompt_used = build_bootstrap_spec_prompt_text(
+                manual_md, idea.description, attachments=attachment_dicts
+            )
             save_ideas(st.session_state.ideas)
 
             # Also generate Invention Description (発明説明書)
@@ -411,6 +419,13 @@ def new_idea_form():
             if inv_err:
                 st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
             idea.invention_description_markdown = inv_text
+            idea.invention_prompt_used = build_invention_description_prompt_text(
+                inv_manual_md,
+                title,
+                idea.description,
+                transcript=idea.messages,
+                attachments=attachment_dicts,
+            )
             save_ideas(st.session_state.ideas)
 
             status.update(label="初回質問を準備中…", state="running")
@@ -740,6 +755,9 @@ def _render_pending_questions(
                 else:
                     idea.draft_spec_markdown = spec_result
                     idea.draft_version += 1
+                    idea.spec_prompt_used = build_regenerate_spec_prompt_text(
+                        manual_md, idea.description, idea.messages, attachments=attachment_dicts
+                    )
 
                 # Regenerate Invention Description in parallel
                 inv_text, inv_err = generate_invention_description(
@@ -754,6 +772,13 @@ def _render_pending_questions(
                     st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
                 else:
                     idea.invention_description_markdown = inv_text
+                    idea.invention_prompt_used = build_invention_description_prompt_text(
+                        _load_invention_instruction_markdown(),
+                        idea.title,
+                        idea.description,
+                        transcript=idea.messages,
+                        attachments=attachment_dicts,
+                    )
 
                 # Check if this should be the final version based on completeness only
                 is_complete, score = check_spec_completeness(
@@ -934,6 +959,9 @@ def _render_refine_ui(idea: Idea) -> None:
                         st.warning(f"⚠️ 明細書ドラフトの同期で問題が発生しました: {spec_err}")
                     else:
                         idea.draft_spec_markdown = new_spec
+                        idea.spec_prompt_used = build_update_spec_from_invention_prompt_text(
+                            manual_md, idea.invention_description_markdown, old_spec
+                        )
                         # Record spec revision history as well
                         spec_diff = unified_markdown_diff(
                             old_spec, new_spec, fromfile="before_spec", tofile="after_spec"
@@ -1039,6 +1067,9 @@ def hearing_ui(idea: Idea):
                 st.error(f"⚠️ {error_msg}")
                 st.info("基本的な骨格を生成しました。")
             idea.draft_spec_markdown = spec_result
+            idea.spec_prompt_used = build_bootstrap_spec_prompt_text(
+                manual_md, idea.description, attachments=attachment_dicts
+            )
             save_ideas(st.session_state.ideas)
 
     # Ensure invention description exists
@@ -1056,6 +1087,13 @@ def hearing_ui(idea: Idea):
             if inv_err:
                 st.warning(f"⚠️ 発明説明書の生成で問題が発生しました: {inv_err}")
             idea.invention_description_markdown = inv_text
+            idea.invention_prompt_used = build_invention_description_prompt_text(
+                inv_manual_md,
+                idea.title,
+                idea.description,
+                transcript=idea.messages,
+                attachments=attachment_dicts,
+            )
             save_ideas(st.session_state.ideas)
 
     # Auto-generate initial questions if none exist yet (up to 10)
@@ -1103,6 +1141,8 @@ def hearing_ui(idea: Idea):
             mime="application/pdf",
             use_container_width=True,
         )
+        with st.expander("使用したプロンプト（全文）", expanded=False):
+            st.code(idea.invention_prompt_used or "(記録なし)", language="markdown")
 
         # Reference: patent specification draft (not a submission)
         st.markdown("---")
@@ -1132,6 +1172,8 @@ def hearing_ui(idea: Idea):
                 mime="application/pdf",
                 use_container_width=True,
             )
+            with st.expander("使用したプロンプト（全文）", expanded=False):
+                st.code(idea.spec_prompt_used or "(記録なし)", language="markdown")
 
         # Allow refinement after completion as requested
         st.divider()
@@ -1178,10 +1220,14 @@ def hearing_ui(idea: Idea):
         # Invention Description (initial draft) first
         with st.expander("発明説明書（ドラフト）", expanded=False):
             st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+            with st.expander("使用したプロンプト（全文）", expanded=False):
+                st.code(idea.invention_prompt_used or "(記録なし)", language="markdown")
 
         # Draft in collapsed expander (keep v1 label for tests)
         with st.expander("生成された明細書ドラフト（第1版）", expanded=False):
             st.markdown(idea.draft_spec_markdown or "未生成", unsafe_allow_html=False)
+            with st.expander("使用したプロンプト（全文）", expanded=False):
+                st.code(idea.spec_prompt_used or "(記録なし)", language="markdown")
         # Show refine UI only after the specification is finalized
         if idea.is_final:
             st.divider()
@@ -1220,6 +1266,8 @@ def hearing_ui(idea: Idea):
                 mime="application/pdf",
                 use_container_width=True,
             )
+            with st.expander("使用したプロンプト（全文）", expanded=False):
+                st.code(idea.invention_prompt_used or "(記録なし)", language="markdown")
 
         # Draft expander after invention description (reference)
         with st.expander("生成された明細書ドラフト（参考）", expanded=False):
@@ -1243,6 +1291,8 @@ def hearing_ui(idea: Idea):
                 mime="application/pdf",
                 use_container_width=True,
             )
+            with st.expander("使用したプロンプト（全文）", expanded=False):
+                st.code(idea.spec_prompt_used or "(記録なし)", language="markdown")
         if idea.is_final:
             st.divider()
             _render_refine_ui(idea)

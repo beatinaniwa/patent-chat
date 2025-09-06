@@ -49,6 +49,9 @@ class Idea:
     draft_spec_markdown: str = ""
     # Invention description (発明説明書 フルバージョン) Markdown
     invention_description_markdown: str = ""
+    # Prompts used for last generation (for confirmation display)
+    spec_prompt_used: str = ""
+    invention_prompt_used: str = ""
     # Draft version counter (1 = 初版)
     draft_version: int = 1
     # Whether this specification is finalized

@@ -50,6 +50,164 @@ def _load_refine_instruction() -> str:
     )
 
 
+def build_bootstrap_spec_prompt_text(
+    sample_manual_md: str, idea_description: str, attachments: Optional[List[Dict]] = None
+) -> str:
+    """Return the exact text (system + prompt) used for initial spec drafting."""
+    system = (
+        "あなたは特許明細書の下書きを作る専門家です。与えられた指示書（プロンプト）を最優先で参照し、"
+        "不足部分は'未記載'と明示しつつ、Markdownで初稿を作ってください。"
+    )
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+    prompt = (
+        f"[指示書]\n{sample_manual_md}\n\n"
+        f"[アイデア概要]\n{idea_description}\n"
+        f"{attachments_section}\n"
+        "[出力要件]\n"
+        "- 見出しは手順書の順序に従う\n"
+        "- 箇条書き可\n"
+        "- 未確定箇所は '未記載' と記す\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
+        "- 添付ファイルの情報を適切に反映させる\n"
+    )
+    return f"{system}\n\n{prompt}"
+
+
+def _build_qa_pairs(transcript: List[Dict[str, str]] | None) -> str:
+    if not transcript:
+        return "（質疑応答なし）"
+    questions: List[str] = []
+    answers: List[str] = []
+    i = 0
+    while i < len(transcript):
+        q_batch: List[str] = []
+        while i < len(transcript) and transcript[i].get("role") == "assistant":
+            q_batch.append(transcript[i]["content"])
+            i += 1
+        a_batch: List[str] = []
+        while i < len(transcript) and transcript[i].get("role") == "user":
+            a_batch.append(transcript[i]["content"])
+            i += 1
+        questions.extend(q_batch)
+        for j in range(len(q_batch)):
+            answers.append(a_batch[j] if j < len(a_batch) else "未回答")
+    pairs = [f"Q: {q}\nA: {a}" for q, a in zip(questions, answers)]
+    return "\n\n".join(pairs) if pairs else "（質疑応答なし）"
+
+
+def build_invention_description_prompt_text(
+    instruction_md: str,
+    invention_title: str,
+    idea_description: str,
+    transcript: List[Dict[str, str]] | None = None,
+    attachments: Optional[List[Dict]] = None,
+) -> str:
+    """Return the exact text (system + prompt) used for invention description generation."""
+    qa_section = _build_qa_pairs(transcript)
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+    system = (
+        "あなたは企業の知財部に所属する熟練の弁理士です。"
+        "与えられた『発明説明書（フルバージョン）生成』の指示を最優先で参照し、"
+        "入力情報・アイデア概要・質疑応答・添付資料を総合して、発明説明書を作成してください。"
+    )
+    input_info = (
+        "**# 入力情報**\n"
+        f"* **発明の名称案:** `{invention_title or '（未設定）'}`\n"
+        f"* **この発明が解決したい課題（背景）:** 未記載（以下の概要・Q&Aから適宜補完）\n"
+        f"* **基本的な解決手段（発明のコアアイデア）:** {idea_description.strip() or '未記載'}\n"
+        f"* **想定される利用者や適用分野:** 未記載（以下の情報から推定可）\n"
+        f"* **その他特記事項（あれば）:** 未記載（添付・Q&A参照）\n"
+    )
+    prompt = (
+        f"[発明説明書作成のための指示]\n{instruction_md}\n\n"
+        f"{input_info}\n\n"
+        f"[アイデアの詳細説明]\n{idea_description}\n\n"
+        f"[ヒアリングQ&A]\n{qa_section}\n"
+        f"{attachments_section}"
+        "[出力要件]\n"
+        "- 指示の章立て（0〜5）に従い、Markdownで出力\n"
+        "- 前置きや挨拶は不要（本文のみ）\n"
+        "- 情報が不足する箇所は '未記載' または '（要確認）' と明記\n"
+    )
+    return f"{system}\n\n{prompt}"
+
+
+def build_regenerate_spec_prompt_text(
+    instruction_md: str,
+    idea_description: str,
+    transcript: List[Dict[str, str]],
+    attachments: Optional[List[Dict]] = None,
+) -> str:
+    # Q&A formatting as in regenerate_spec
+    questions: List[str] = []
+    answers: List[str] = []
+    i = 0
+    while i < len(transcript):
+        batch_questions: List[str] = []
+        while i < len(transcript) and transcript[i].get("role") == "assistant":
+            batch_questions.append(transcript[i]["content"])
+            i += 1
+        batch_answers: List[str] = []
+        while i < len(transcript) and transcript[i].get("role") == "user":
+            batch_answers.append(transcript[i]["content"])
+            i += 1
+        questions.extend(batch_questions)
+        for j in range(len(batch_questions)):
+            answers.append(batch_answers[j] if j < len(batch_answers) else "未回答")
+    qa_pairs = [f"Q: {q}\nA: {a}" for q, a in zip(questions, answers)]
+    qa_section = "\n\n".join(qa_pairs) if qa_pairs else "（質疑応答なし）"
+
+    attachments_section = ""
+    if attachments:
+        formatted_attachments = _format_attachments_for_prompt(attachments)
+        if formatted_attachments:
+            attachments_section = f"\n[添付ファイル情報]\n{formatted_attachments}\n"
+    system = (
+        "あなたは特許明細書の執筆専門家です。与えられた指示書を参考にしつつ、"
+        "アイデア概要と質疑応答の内容から、完全な特許明細書を作成してください。"
+    )
+    prompt = (
+        f"[作成の指針となる指示書]\n{instruction_md}\n\n"
+        f"[発明のアイデア概要]\n{idea_description}\n\n"
+        f"[ヒアリングによる追加情報]\n{qa_section}\n"
+        f"{attachments_section}"
+        "[出力要件]\n"
+        "- 指示書は作成の指針として参照し、指示書の文章そのものは出力に含めないこと\n"
+        "- 前置きや挨拶は不要（本文のみ）\n"
+        "- 不足情報は '未記載' または '（要確認）' と記す\n"
+        "- セクション構成は一般的な特許明細書に準拠\n"
+    )
+    return f"{system}\n\n{prompt}"
+
+
+def build_update_spec_from_invention_prompt_text(
+    instruction_md: str, invention_description_md: str, current_spec_md: str
+) -> str:
+    system = (
+        "あなたは企業の知財部に所属する熟練の弁理士です。"
+        "以下の『発明説明書』の内容に整合するよう、『明細書ドラフト』を更新してください。"
+    )
+    prompt = (
+        f"[作成の指針]\n{instruction_md}\n\n"
+        f"[発明説明書（整合対象・最新版）]\n{invention_description_md}\n\n"
+        f"[現行の明細書ドラフト（Markdown）]\n{current_spec_md}\n\n"
+        "[出力要件]\n"
+        "- 構成・章立て・番号（請求項番号等）は維持しつつ整合させる\n"
+        "- 前置きや挨拶は不要（本文のみを出力）\n"
+        "- 指示書の文はそのまま出力に含めない\n"
+        "- 情報が不足している箇所は '未記載' または '（要確認）' と明記\n"
+    )
+    return f"{system}\n\n{prompt}"
+
+
 def _classify_api_error(e: Exception) -> str:
     """エラーを分類してユーザーフレンドリーなメッセージを返す"""
     error_str = str(e).lower()
