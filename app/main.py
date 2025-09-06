@@ -1269,10 +1269,12 @@ def prompt_editor_ui():
     with tab_inv:
         default_inv_md = _load_invention_instruction_markdown()
         current_inv = state.custom_invention_prompt or default_inv_md
+        # Avoid setting both value= and session_state for the same key
+        if "inv_prompt_editor_text" not in st.session_state:
+            st.session_state["inv_prompt_editor_text"] = current_inv
         inv_val = st.text_area(
             "発明説明書用プロンプト (Markdown)",
             key="inv_prompt_editor_text",
-            value=current_inv,
             height=360,
         )
         btns2 = st.columns(3)
@@ -1291,10 +1293,11 @@ def prompt_editor_ui():
     with tab_spec:
         default_spec_md = _load_instruction_markdown()
         current_spec = state.custom_spec_prompt or default_spec_md
+        if "spec_prompt_editor_text" not in st.session_state:
+            st.session_state["spec_prompt_editor_text"] = current_spec
         spec_val = st.text_area(
             "明細書ドラフト用プロンプト (Markdown)",
             key="spec_prompt_editor_text",
-            value=current_spec,
             height=360,
         )
         btns = st.columns(3)
