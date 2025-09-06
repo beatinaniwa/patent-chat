@@ -49,3 +49,6 @@ Icon?
 # Editors
 .vscode/
 .idea/
+
+# Local AI assistant config (not for commit)
+.codex/

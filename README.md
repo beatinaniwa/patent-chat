@@ -2,62 +2,84 @@
 
 特許出願アイデアを対話で具体化し、特許明細書草案を生成する Web アプリです。
 
-## 要件
-- Python 3.12
-- パッケージ管理: uv
-- LLM: Google Gemini 2.5（Pro/Flash 切替可能、Google GenAI SDK）
+## 要件 / セットアップ
+- 必須: Python 3.12, `uv`
+- LLM: Google Gemini 2.5（Pro/Flash 切替、Google GenAI SDK 使用）
 
-## セットアップ
 ```bash
-# リポジトリ取得（初回）
+# 初回のみ
 git clone <THIS_REPO_URL>
 cd patent-chat
 
-# 依存関係同期
+# 依存関係の同期
 uv sync
 
-# 環境変数設定（例）
-# .env に以下を設定するか、shell に export してください
-# GOOGLE_API_KEY=xxxxx  # または GEMINI_API_KEY=xxxxx
-# GEMINI_MODEL=gemini-2.5-pro          # 仕様生成系の既定モデル（UI で変更可）
+# 環境変数（.env 推奨）
+# GOOGLE_API_KEY=xxxxx   # または GEMINI_API_KEY=xxxxx
+# GEMINI_MODEL=gemini-2.5-pro   # 既定モデル（UI から変更可）
 ```
 
-アプリ起動後、サイドバーの「Geminiモデル」から Pro と Flash を切り替えられます。
-タイトル生成には常に gemini-2.5-flash が使用されます。
-
-## 開発サーバ起動
+起動:
 ```bash
 uv run streamlit run app/main.py
 ```
 
-## Basic 認証（アプリ内）
-- 画面表示前にログインを要求する簡易的な Basic 認証を追加しました。
-- 有効化は環境変数で制御します（未設定なら無効）。
+サイドバーの「Geminiモデル」から Pro/Flash を切替可。タイトル生成には gemini-2.5-flash を使用します。
 
-環境変数（`.env` など）：
+## プロジェクト構成
+- `app/`: コアアプリ
+  - `app/main.py`: Streamlit UI とレイアウト
+  - `app/state.py`: Dataclass モデルと UI ステート
+  - `app/llm.py`: Gemini 連携（フォールバック含む）
+  - `app/storage.py`: JSON 永続化（`data/ideas.json`）
+  - `app/spec_builder.py`: 会話ヘルパ（仕様生成）
+  - `app/export.py`: Word/PDF エクスポート
+- `tests/`: Pytest スイート（小さく、振る舞い優先）
+- `.github/`: PR テンプレート。`PR_BODY.md` が唯一の真実の情報源（SSOT）
+- ドキュメント: `LLM_Prompt_*.md`, `sample.md`
+- 設定: `.env`（API キー。コミットしない）
+
+## 開発コマンド
+- セットアップ: `uv sync`
+- 実行: `uv run streamlit run app/main.py`
+- Lint: `uv run ruff check app/`（自動修正: `--fix`）
+- Format: `uv run ruff format app/`
+- テスト: `uv run pytest -q`（カバレッジ: `--cov=app --cov-report=html`）
+- フック: `uv run pre-commit install`（全実行: `uv run pre-commit run --all-files`）
+
+## コーディング規約
+- スタイル: 4 スペース、行長 100、import は isort 互換（Ruff）
+- 型: 可能な限り型ヒント。公開関数は docstring
+- 命名: 関数/変数は `snake_case`、クラスは `PascalCase`、定数は `UPPER_CASE`
+- 小さな関数と副作用の最小化、`logging` で記録
+
+## テスト方針
+- TDD（Red → Green → Refactor）。失敗するテストから開始
+- 配置: `tests/test_*.py`、テスト名は `test_<behavior>`
+- 範囲: `state`/`storage`/`spec_builder` のユニットテスト。ネットワーク/LLM はモック
+- 実行: `uv run pytest -q` を常にグリーンに維持
+
+## コミット / PR ガイド
+- ブランチ: `main` から作成（例: `feature/<name>`、`fix/<name>`）。`main` へ直接コミットしない
+- コミット: Conventional Commits（例: `feat: ...`、`fix(llm): ...`）
+- PR（日本語・構造化 Markdown）:
+  - 作成: `gh pr create --title "feat: ..." --body-file PR_BODY.md`
+  - SSOT: `PR_BODY.md` を編集し、`gh pr edit <num> --body-file PR_BODY.md` で同期
+  - 含める: 概要/背景/変更点/確認方法/影響範囲/リスク・互換性/関連、テスト結果/スクショ
+- クオリティゲート: `uv run pytest -q` と `uv run pre-commit run --all-files` が通過していること
+
+## セキュリティ / 設定
+- `.env`（コミットしない）: `GOOGLE_API_KEY` または `GEMINI_API_KEY`、`GEMINI_MODEL`
+- 秘密情報はログ出力しない。API 不可時のフォールバックを検証
+
+## Basic 認証（アプリ内）
+- 画面表示前に簡易ログインを要求（未設定なら無効）
 ```dotenv
 BASIC_AUTH_USERNAME=your_user
 BASIC_AUTH_PASSWORD=your_password
 ```
+- ログイン後はサイドバーから「ログアウト」可能。HTTP レイヤの厳密な Basic 認証が必要な場合は、Nginx 等で `auth_basic` を設定
 
-ヒント:
-- ログイン後はサイドバーから「ログアウト」できます。
-- 本実装はアプリ内のログインです。HTTP レベルの厳密な Basic 認証が必要な場合は、Nginx などのリバースプロキシで設定してください（例: `auth_basic`）。
-
-## 構成
-- `app/main.py`: Streamlit エントリポイント
-- `app/state.py`: アプリ全体の状態管理（SessionState）
-- `app/storage.py`: アイデアとセッションの永続化層（ローカル JSON）
-- `app/llm.py`: Gemini 2.5 Pro API ラッパ（google-genai）
-- `app/spec_builder.py`: 特許明細作成ロジック（質問計画・生成）
-- `app/export.py`: Word/PDF 出力
-- `sample.md`: 特許明細作成手順書
-- `LLM_Prompt_for_Patent_Application_Drafting_from_Idea.md`:（任意）アイディアから明細作成のための指示書。存在すれば最優先で使用
-- `uv.lock` / `pyproject.toml`: 依存管理
-
-## 環境変数
-- `GOOGLE_API_KEY`: Gemini 用 API キー
-
-## メモ
-- 初回起動時に `data/ideas.json` 等が自動生成されます。
-- PDF/Word 生成は簡易テンプレートからエクスポートします。
+## 補足
+- 初回起動時に `data/ideas.json` 等が自動生成されます
+- PDF/Word は簡易テンプレートからエクスポートします
