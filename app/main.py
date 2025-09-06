@@ -1327,31 +1327,58 @@ def prompt_editor_ui():
             spec_text.strip() != (spec_applied or "").strip()
         )
 
-        st.markdown("---")
-        if has_unsaved:
-            st.warning("編集中のプロンプトがセッションに反映されていません。どのように進みますか？")
-            c1, c2, c3 = st.columns(3)
-            if c1.button("セッションに反映して新規作成へ"):
-                state.custom_invention_prompt = inv_text
-                state.custom_spec_prompt = spec_text
-                st.session_state.pop("pending_nav_to", None)
-                state.show_prompt_editor = False
-                state.show_new_idea_form = True
-                st.rerun()
-            if c2.button("破棄して新規作成へ"):
-                st.session_state.pop("pending_nav_to", None)
-                state.show_prompt_editor = False
-                state.show_new_idea_form = True
-                st.rerun()
-            if c3.button("キャンセル"):
-                st.session_state.pop("pending_nav_to", None)
-                st.rerun()
+        # Prefer native modal if available
+        if has_unsaved and hasattr(st, "dialog"):
+            with st.dialog("未反映のプロンプトがあります"):
+                st.write(
+                    "編集中のプロンプトがセッションに反映されていません。どのように進みますか？"
+                )
+                st.caption("選択肢: 反映して進む / 破棄して進む / キャンセル")
+                c1, c2, c3 = st.columns(3)
+                if c1.button("セッションに反映して新規作成へ", type="primary"):
+                    state.custom_invention_prompt = inv_text
+                    state.custom_spec_prompt = spec_text
+                    st.session_state.pop("pending_nav_to", None)
+                    state.show_prompt_editor = False
+                    state.show_new_idea_form = True
+                    st.rerun()
+                if c2.button("破棄して新規作成へ"):
+                    st.session_state.pop("pending_nav_to", None)
+                    state.show_prompt_editor = False
+                    state.show_new_idea_form = True
+                    st.rerun()
+                if c3.button("キャンセル"):
+                    st.session_state.pop("pending_nav_to", None)
+                    st.rerun()
         else:
-            # No unsaved edits; proceed directly
-            st.session_state.pop("pending_nav_to", None)
-            state.show_prompt_editor = False
-            state.show_new_idea_form = True
-            st.rerun()
+            # Fallback inline confirmation (非モーダル)
+            if has_unsaved:
+                st.markdown("---")
+                st.warning(
+                    "編集中のプロンプトがセッションに反映されていません。どのように進みますか？"
+                )
+                c1, c2, c3 = st.columns(3)
+                if c1.button("セッションに反映して新規作成へ", type="primary"):
+                    state.custom_invention_prompt = inv_text
+                    state.custom_spec_prompt = spec_text
+                    st.session_state.pop("pending_nav_to", None)
+                    state.show_prompt_editor = False
+                    state.show_new_idea_form = True
+                    st.rerun()
+                if c2.button("破棄して新規作成へ"):
+                    st.session_state.pop("pending_nav_to", None)
+                    state.show_prompt_editor = False
+                    state.show_new_idea_form = True
+                    st.rerun()
+                if c3.button("キャンセル"):
+                    st.session_state.pop("pending_nav_to", None)
+                    st.rerun()
+            else:
+                # No unsaved edits; proceed directly
+                st.session_state.pop("pending_nav_to", None)
+                state.show_prompt_editor = False
+                state.show_new_idea_form = True
+                st.rerun()
 
     # 画面を閉じる
     st.markdown("---")
