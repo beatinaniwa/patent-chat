@@ -1252,6 +1252,15 @@ def prompt_editor_ui():
     st.caption("明細書ドラフト/発明説明書の指示プロンプトを編集し、適用・保存できます。")
 
     # カスタムプロンプトはセッションに反映されていれば常に使用します
+
+    # Handle deferred resets/imports BEFORE rendering widgets
+    inv_reset = st.session_state.pop("inv_prompt_reset_to", None)
+    if inv_reset is not None:
+        st.session_state["inv_prompt_editor_text"] = inv_reset
+    spec_reset = st.session_state.pop("spec_prompt_reset_to", None)
+    if spec_reset is not None:
+        st.session_state["spec_prompt_editor_text"] = spec_reset
+
     st.divider()
 
     tab_inv, tab_spec = st.tabs(["発明説明書の指示", "明細書ドラフトの指示"])
@@ -1273,9 +1282,10 @@ def prompt_editor_ui():
         if btns2[1].button("MDをダウンロード", key="save_inv"):
             pass
         if btns2[2].button("初期化（リポジトリ版に戻す）", key="reset_inv"):
-            st.session_state["inv_prompt_editor_text"] = default_inv_md
+            # Defer setting widget state until next rerun
+            st.session_state["inv_prompt_reset_to"] = default_inv_md
             state.custom_invention_prompt = ""
-            st.info("リポジトリのデフォルトに戻しました。")
+            st.rerun()
 
     # Spec prompt tab (second)
     with tab_spec:
@@ -1296,9 +1306,9 @@ def prompt_editor_ui():
             # no-op; use the download buttons below for actual export
             pass
         if btns[2].button("初期化（リポジトリ版に戻す）"):
-            st.session_state["spec_prompt_editor_text"] = default_spec_md
+            st.session_state["spec_prompt_reset_to"] = default_spec_md
             state.custom_spec_prompt = ""
-            st.info("リポジトリのデフォルトに戻しました。")
+            st.rerun()
 
         # Execute with selected idea
         idea_id = state.selected_idea_id
@@ -1375,11 +1385,11 @@ def prompt_editor_ui():
             data = json.loads(uploaded.read().decode("utf-8"))
             spec_md = data.get("spec_instruction_md") or ""
             inv_md = data.get("invention_instruction_md") or ""
-            st.session_state["spec_prompt_editor_text"] = spec_md
-            st.session_state["inv_prompt_editor_text"] = inv_md
+            # Defer widget content updates to next rerun
+            st.session_state["spec_prompt_reset_to"] = spec_md
+            st.session_state["inv_prompt_reset_to"] = inv_md
             state.custom_spec_prompt = spec_md
             state.custom_invention_prompt = inv_md
-            st.success("JSONを読み込み、セッションに反映しました。")
             st.rerun()
         except Exception as e:
             st.error(f"JSON読み込みに失敗しました: {e}")
