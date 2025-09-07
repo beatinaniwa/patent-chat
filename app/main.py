@@ -1465,7 +1465,7 @@ def main():
     # Basic authentication gate (enabled via env: BASIC_AUTH_USERNAME/PASSWORD)
     render_login_gate(st)
     st.title(APP_TITLE)
-    st.caption("特許出願アイデアを対話で具体化し、明細書草案を生成します。")
+    st.caption("特許出願アイデアを対話で具体化し、特許説明書を生成します。")
 
     # Dark theme note: instruct Streamlit to use base dark theme via config.toml if desired
 
