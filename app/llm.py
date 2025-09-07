@@ -496,6 +496,7 @@ def next_questions(
         if formatted_attachments:
             attachments_section = f"\n[添付ファイル]\n{formatted_attachments}\n"
 
+    # Unified prompt (attachments_section already includes info when present)
     prompt = (
         f"[指示書]\n{instruction_md}\n\n"
         f"[現行ドラフト(Markdown)]\n{current_spec_md}\n\n"
@@ -505,26 +506,16 @@ def next_questions(
         "- 質問のみを出力（前置きや挨拶は不要）\n"
         "- 各行1問、{num}問\n"
         "- 最初の8問は『はい/いいえ』で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
-        "- 最後の2問は自由記述形式（末尾に'（自由記述）'）で、"
-        "『〜ありますか？』や『〜ですか？』などの二択誘導を避け、"
-        "『どのような』『なぜ』『何』『具体例を挙げて』等の表現を用いる\n"
+        "- 最後の2問は自由記述形式（末尾に'（自由記述）'）で、\n"
+        "  『〜ありますか？』や『〜ですか？』などの二択誘導を避け、\n"
+        "  『どのような』『なぜ』『何』『具体例を挙げて』等の表現を用いる\n"
         "- 1つの質問につき1論点、具体的に\n"
         "- 既に回答済みの重複質問は避ける\n"
-        "- 添付ファイルの内容も考慮する\n".replace("{num}", str(num_questions))
-        if attachments
-        else f"[指示書]\n{instruction_md}\n\n"
-        f"[現行ドラフト(Markdown)]\n{current_spec_md}\n\n"
-        f"[これまでの対話]\n{transcript_str}\n\n"
-        "[出力要件]\n"
-        "- 質問のみを出力（前置きや挨拶は不要）\n"
-        "- 各行1問、{num}問\n"
-        "- 最初の8問は『はい/いいえ』で答えられる形式（例: '〜ですか？（はい/いいえ）'）\n"
-        "- 最後の2問は自由記述形式（末尾に'（自由記述）'）で、"
-        "『〜ありますか？』や『〜ですか？』などの二択誘導を避け、"
-        "『どのような』『なぜ』『何』『具体例を挙げて』等の表現を用いる\n"
-        "- 1つの質問につき1論点、具体的に\n"
-        "- 既に回答済みの重複質問は避ける\n".replace("{num}", str(num_questions))
-    )
+        "- 添付ファイルの内容も考慮する\n"
+        "- 質問内で『請求項X』に言及する場合、必ず括弧書きでその内容を分かりやすく補足する\n"
+        "  （例:『請求項1（画像分類モデルの学習手順）』）。必要に応じて1〜2文の説明や例も可\n"
+        "  （正確さと分かりやすさを優先し、専門用語の多用は避ける）\n"
+    ).replace("{num}", str(num_questions))
     try:
         model_name = _model_name()
         logger.info(
@@ -560,6 +551,8 @@ def next_questions(
             "今後の改良案や展望はどのようなものですか？（自由記述）",
         ][:num_questions], error_msg
     lines = [line.strip("- ") for line in text.splitlines() if line.strip()]
+
+    # 『請求項』は使用可。括弧内の補足はプロンプトで誘導する（ここでは置換なし）。
 
     # Enforce 8 yes/no + 2 open when requesting 10 questions
     # Open questions: mark with '（自由記述）' and ensure they don't include 'はい/いいえ'

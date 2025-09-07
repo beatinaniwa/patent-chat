@@ -1129,6 +1129,18 @@ def hearing_ui(idea: Idea):
         st.subheader("発明説明書（フルバージョン）")
         st.success("✅ 発明説明書が完成しました。以下が最終版の内容です。")
         st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+        with st.expander("Markdownをコピー", expanded=False):
+            st.code(idea.invention_description_markdown or "", language="markdown")
+        with st.expander("発明説明書を編集", expanded=False):
+            edited_inv = st.text_area(
+                "Markdown",
+                value=idea.invention_description_markdown,
+                height=500,
+            )
+            if st.button("編集内容を保存（発明説明書）"):
+                idea.invention_description_markdown = edited_inv
+                save_ideas(st.session_state.ideas)
+                st.success("保存しました。")
         c3, c4 = st.columns(2)
         inv_title = f"{idea.title}_発明説明書"
         name_docx2, data_docx2 = export_docx(inv_title, idea.invention_description_markdown)
@@ -1226,6 +1238,8 @@ def hearing_ui(idea: Idea):
         # Invention Description (initial draft) first
         with st.expander("発明説明書（ドラフト）", expanded=False):
             st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+            with st.expander("Markdownをコピー", expanded=False):
+                st.code(idea.invention_description_markdown or "", language="markdown")
             with st.expander("使用したプロンプト（全文）", expanded=False):
                 st.code(idea.invention_prompt_used or "(記録なし)", language="markdown")
 
@@ -1253,6 +1267,8 @@ def hearing_ui(idea: Idea):
         # Invention Description (draft) expander for non-final versions first
         with st.expander("発明説明書（ドラフト）", expanded=False):
             st.markdown(idea.invention_description_markdown or "未生成", unsafe_allow_html=False)
+            with st.expander("Markdownをコピー", expanded=False):
+                st.code(idea.invention_description_markdown or "", language="markdown")
             st.markdown("---")
             c3, c4 = st.columns(2)
             inv_title2 = f"{idea.title}_発明説明書"
