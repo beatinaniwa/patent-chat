@@ -1,6 +1,7 @@
 [theme]
-base = "dark"
-primaryColor = "#6DB33F"
-backgroundColor = "#0E1117"
-secondaryBackgroundColor = "#1B2230"
-textColor = "#FAFAFA"
+# Light, professional palette with blue accent
+base = "light"
+primaryColor = "#0056A3"            # Deep corporate blue (buttons, accents)
+backgroundColor = "#FFFFFF"          # Main background
+secondaryBackgroundColor = "#F3F6FA" # Panels / sidebar background
+textColor = "#1A1A1A"                # High-contrast body text
