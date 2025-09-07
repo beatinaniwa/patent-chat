@@ -512,9 +512,11 @@ def next_questions(
         "- 1つの質問につき1論点、具体的に\n"
         "- 既に回答済みの重複質問は避ける\n"
         "- 添付ファイルの内容も考慮する\n"
-        "- 質問内で特定の請求項番号（例:『請求項1』）に言及する場合、その請求項の内容を"
-        "ユーザーが理解しやすいように具体的に補足する（必要に応じて1〜2文の説明や例を"
-        "含めてもよい。専門用語の多用は避け、分かりやすさを優先）\n"
+        "- 用語『請求項』は使わず、分かりやすい表現に言い換える\n"
+        "  （例:『権利として守りたいポイント』『特許で守る内容の案』など）\n"
+        "- 特定の権利ポイントに言及する場合は、番号と内容を分かりやすく補足する\n"
+        "  （例:『権利として守りたいポイント1（画像分類モデルの学習手順）』）。\n"
+        "  必要に応じて1〜2文の説明や例を含めてもよい（専門用語の多用は避ける）\n"
     ).replace("{num}", str(num_questions))
     try:
         model_name = _model_name()
@@ -551,6 +553,17 @@ def next_questions(
             "今後の改良案や展望はどのようなものですか？（自由記述）",
         ][:num_questions], error_msg
     lines = [line.strip("- ") for line in text.splitlines() if line.strip()]
+
+    # Rephrase any occurrences of 『請求項』 into user-friendly wording.
+    def _friendly_claim_wording(s: str) -> str:
+        try:
+            s2 = re.sub(r"請求項\s*([0-9０-９]+)", r"権利として守りたいポイント\1", s)
+            s2 = s2.replace("請求項", "権利として守りたいポイント")
+            return s2
+        except Exception:
+            return s
+
+    lines = [_friendly_claim_wording(item) for item in lines]
 
     # Enforce 8 yes/no + 2 open when requesting 10 questions
     # Open questions: mark with '（自由記述）' and ensure they don't include 'はい/いいえ'
