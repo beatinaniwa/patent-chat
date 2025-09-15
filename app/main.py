@@ -252,10 +252,14 @@ def sidebar_ui():
         if cols[0].button(f"{idea.title or '(無題)'}", key=f"sel-{idea.id}"):
             state.selected_idea_id = idea.id
             state.show_new_idea_form = False
+            # Ensure prompt editor does not keep overriding main area
+            state.show_prompt_editor = False
             st.rerun()
         if cols[1].button("編集", key=f"edit-{idea.id}"):
             state.selected_idea_id = idea.id
             state.show_new_idea_form = True
+            # Ensure prompt editor is closed when navigating to edit form
+            state.show_prompt_editor = False
             st.rerun()
         if cols[2].button("削除", key=f"del-{idea.id}"):
             st.session_state.ideas = delete_idea(ideas, idea.id)
