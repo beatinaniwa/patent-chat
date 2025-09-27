@@ -14,6 +14,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
 
+PDF_BASE_FONT = "STSong-Light"
+PDF_BOLD_FONT = "HeiseiKakuGo-W5"
+
 
 @dataclass
 class MarkdownElement:
@@ -86,10 +89,18 @@ def _escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _wrap_bold(content: str) -> str:
+    return f"<font face='{PDF_BOLD_FONT}'><b>{content}</b></font>"
+
+
 def _format_emphasis(segment: str) -> str:
     # Handle bold+italic before other emphasis to keep tag nesting balanced.
-    segment = re.sub(r"\*\*\*(.+?)\*\*\*", r"<b><i>\1</i></b>", segment)
-    segment = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", segment)
+    segment = re.sub(
+        r"\*\*\*(.+?)\*\*\*",
+        lambda m: _wrap_bold(f"<i>{m.group(1)}</i>"),
+        segment,
+    )
+    segment = re.sub(r"\*\*(.+?)\*\*", lambda m: _wrap_bold(m.group(1)), segment)
     segment = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", segment)
     return segment
 
@@ -225,11 +236,12 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
     buffer = BytesIO()
 
     # Register Japanese-capable CID font (built-in CJK font mapping)
-    try:
-        pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
-    except Exception:
-        # Registration is idempotent; ignore if already registered or unavailable
-        pass
+    for font in (PDF_BASE_FONT, PDF_BOLD_FONT):
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont(font))
+        except Exception:
+            # Registration is idempotent; ignore if already registered or unavailable
+            pass
 
     # Document setup
     doc = SimpleDocTemplate(
@@ -244,7 +256,7 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
     # Base styles with CJK wrapping
     base = ParagraphStyle(
         name="Base",
-        fontName="HeiseiKakuGo-W5",
+        fontName=PDF_BASE_FONT,
         fontSize=10,
         leading=14,
         spaceAfter=6,

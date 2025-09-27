@@ -31,6 +31,6 @@ def test_markdown_rendered_in_docx_and_pdf():
 
 def test_md_inline_to_xhtml_balances_nested_emphasis():
     result = md_inline_to_xhtml("***強調*** 通常の文章")
-    assert "<b><i>強調</i></b>" in result
+    assert "<font face='HeiseiKakuGo-W5'><b><i>強調</i></b></font>" in result
     assert result.endswith(" 通常の文章")
     assert result.count("<b>") == result.count("</b>")
