@@ -5,7 +5,7 @@ from io import BytesIO
 from docx import Document
 from pypdf import PdfReader
 
-from app.export import export_docx, export_pdf
+from app.export import export_docx, export_pdf, md_inline_to_xhtml
 
 
 def test_markdown_rendered_in_docx_and_pdf():
@@ -27,3 +27,10 @@ def test_markdown_rendered_in_docx_and_pdf():
     assert "- 箇条書き" not in full_text
     assert "見出し" in full_text
     assert "箇条書き" in full_text
+
+
+def test_md_inline_to_xhtml_balances_nested_emphasis():
+    result = md_inline_to_xhtml("***強調*** 通常の文章")
+    assert "<font face='HeiseiKakuGo-W5'><b><i>強調</i></b></font>" in result
+    assert result.endswith(" 通常の文章")
+    assert result.count("<b>") == result.count("</b>")

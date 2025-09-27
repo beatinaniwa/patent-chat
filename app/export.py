@@ -14,6 +14,9 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
 
+PDF_BASE_FONT = "HeiseiMin-W3"
+PDF_BOLD_FONT = "HeiseiKakuGo-W5"
+
 
 @dataclass
 class MarkdownElement:
@@ -80,6 +83,50 @@ def parse_markdown(markdown_text: str) -> List[MarkdownElement]:
         elements.append(MarkdownElement("codeblock", "\n".join(code_lines)))
 
     return elements
+
+
+def _escape_html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _wrap_bold(content: str) -> str:
+    return f"<font face='{PDF_BOLD_FONT}'><b>{content}</b></font>"
+
+
+def _format_emphasis(segment: str) -> str:
+    # Handle bold+italic before other emphasis to keep tag nesting balanced.
+    segment = re.sub(
+        r"\*\*\*(.+?)\*\*\*",
+        lambda m: _wrap_bold(f"<i>{m.group(1)}</i>"),
+        segment,
+    )
+    segment = re.sub(r"\*\*(.+?)\*\*", lambda m: _wrap_bold(m.group(1)), segment)
+    segment = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", segment)
+    return segment
+
+
+def md_inline_to_xhtml(text: str) -> str:
+    """Convert inline Markdown markers to simple XHTML understood by ReportLab."""
+
+    parts: list[str] = []
+    i = 0
+    while i < len(text):
+        if text[i] == "`":
+            j = text.find("`", i + 1)
+            if j != -1:
+                code = text[i + 1 : j]
+                parts.append(f"<font face='Courier'>{_escape_html(code)}</font>")
+                i = j + 1
+                continue
+        j = text.find("`", i)
+        segment = text[i : (j if j != -1 else len(text))]
+        if segment:
+            escaped = _escape_html(segment)
+            parts.append(_format_emphasis(escaped))
+        if j == -1:
+            break
+        i = j
+    return "".join(parts)
 
 
 def _add_md_inline_runs(paragraph, text: str) -> None:
@@ -189,11 +236,12 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
     buffer = BytesIO()
 
     # Register Japanese-capable CID font (built-in CJK font mapping)
-    try:
-        pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
-    except Exception:
-        # Registration is idempotent; ignore if already registered or unavailable
-        pass
+    for font in (PDF_BASE_FONT, PDF_BOLD_FONT):
+        try:
+            pdfmetrics.registerFont(UnicodeCIDFont(font))
+        except Exception:
+            # Registration is idempotent; ignore if already registered or unavailable
+            pass
 
     # Document setup
     doc = SimpleDocTemplate(
@@ -208,7 +256,7 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
     # Base styles with CJK wrapping
     base = ParagraphStyle(
         name="Base",
-        fontName="HeiseiKakuGo-W5",
+        fontName=PDF_BASE_FONT,
         fontSize=10,
         leading=14,
         spaceAfter=6,
@@ -244,33 +292,6 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
     story: List[object] = []
     story.append(Paragraph(title or "特許明細書草案", style_title))
 
-    # Inline Markdown -> simple XHTML for Paragraph
-    def _md_inline_to_xhtml(text: str) -> str:
-        # Split by backticks to protect code spans
-        parts: list[str] = []
-        i = 0
-        while i < len(text):
-            if text[i] == "`":
-                j = text.find("`", i + 1)
-                if j != -1:
-                    code = text[i + 1 : j]
-                    esc = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-                    parts.append(f"<font face='Courier'>{esc}</font>")
-                    i = j + 1
-                    continue
-            # Non-code chunk
-            j = text.find("`", i)
-            segment = text[i : (j if j != -1 else len(text))]
-            esc = segment.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            # Bold then italic (simple, non-nested)
-            esc = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", esc)
-            esc = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<i>\1</i>", esc)
-            parts.append(esc)
-            if j == -1:
-                break
-            i = j
-        return "".join(parts)
-
     # Helper to flush a pending list buffer to story
     def flush_list(buffer: list[MarkdownElement]) -> None:
         if not buffer:
@@ -280,7 +301,7 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
         items: list[ListItem] = []
         if first.kind == "bullet":
             for el in buffer:
-                items.append(ListItem(Paragraph(_md_inline_to_xhtml(el.text), base)))
+                items.append(ListItem(Paragraph(md_inline_to_xhtml(el.text), base)))
             story.append(
                 ListFlowable(
                     items,
@@ -293,7 +314,7 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
         elif first.kind == "number":
             start_num = first.number or 1
             for el in buffer:
-                items.append(ListItem(Paragraph(_md_inline_to_xhtml(el.text), base)))
+                items.append(ListItem(Paragraph(md_inline_to_xhtml(el.text), base)))
             story.append(
                 ListFlowable(
                     items,
@@ -334,17 +355,17 @@ def export_pdf(title: str, markdown_text: str) -> Tuple[str, bytes]:
             continue
 
         if element.kind == "quote":
-            story.append(Paragraph(_md_inline_to_xhtml(element.text), style_quote))
+            story.append(Paragraph(md_inline_to_xhtml(element.text), style_quote))
             continue
 
         if element.kind == "codeblock":
             # Use a Paragraph per line to keep CJK font while showing a code-like block
             for ln in (element.text or "").splitlines() or [""]:
-                story.append(Paragraph(_md_inline_to_xhtml(ln), style_code))
+                story.append(Paragraph(md_inline_to_xhtml(ln), style_code))
             continue
 
         # paragraph with inline styles
-        story.append(Paragraph(_md_inline_to_xhtml(element.text), base))
+        story.append(Paragraph(md_inline_to_xhtml(element.text), base))
 
     # Flush any trailing list
     flush_list(list_buffer)
