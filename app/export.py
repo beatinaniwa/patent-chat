@@ -14,7 +14,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
 
-PDF_BASE_FONT = "STSong-Light"
+PDF_BASE_FONT = "HeiseiMin-W3"
 PDF_BOLD_FONT = "HeiseiKakuGo-W5"
 
 
